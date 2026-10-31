@@ -1,0 +1,8 @@
+
+=== 1. HTTP GET trang danh sách (không dùng trình duyệt)
+LỖI HTTP: ConnectError('[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol (_ssl.c:1010)')
+
+=== 2. Mở trang bằng Chromium (Playwright)
+LỖI mở trang: Error('Page.goto: net::ERR_CONNECTION_CLOSED at https://congbobanan.toaan.gov.vn/0tat1cvn/ban-an-quyet-dinh\nCall log:\n  - navigating to "https://congbobanan.toaan.gov.vn/0tat1cvn/ban-an-quyet-dinh", waiting until "networkidle"\n')
+EXIT_CODE=1
+RUNNER_IP=20.169.99.203
