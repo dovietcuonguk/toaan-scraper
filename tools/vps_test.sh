@@ -22,6 +22,12 @@ echo "KẾT LUẬN BƯỚC 1: TRUY CẬP ĐƯỢC."
 
 echo
 echo "== Bước 2: cài đặt (khoảng 3-5 phút) =="
+# Máy chạy thử chỉ có 2 GB RAM: thêm 2 GB bộ nhớ ảo (swap) để Chromium không bị thiếu RAM.
+mem_kb=$(awk '/MemTotal/{print $2}' /proc/meminfo)
+if [ "$mem_kb" -lt 3500000 ] && ! swapon --show | grep -q swapfile; then
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  echo "Đã thêm 2 GB swap."
+fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq && apt-get install -y -qq git python3-venv python3-pip >/dev/null
 rm -rf ~/toaan-scraper
