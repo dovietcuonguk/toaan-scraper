@@ -146,6 +146,10 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False, expected_tota
                 "bộ lọc năm khi đã chọn Tòa. Nhóm này đã chứa toàn bộ danh sách; bỏ chia năm từ nay.")
             BROKEN_FLAG.parent.mkdir(parents=True, exist_ok=True)
             BROKEN_FLAG.write_text(f"{court}/{case_type}/{bucket}: {ratio:.0%} ngoài khoảng ({n} bản ghi)")
+    import shutil
+    while shutil.disk_usage("/").free < 3e9:
+        log("Ổ đĩa còn dưới 3 GB — tạm dừng tải PDF 10 phút, chờ đẩy file lên Drive")
+        time.sleep(600)
     log(f"[{court}/{case_type}/{bucket}] tải PDF")
     if not run([PY, "fetch_pdfs.py", "--records-dir", str(out), "--delay", "0.8"], tries=3, wait=60):
         log(f"[{court}/{case_type}/{bucket}] LỖI tải PDF — để lại, chạy lại sau")

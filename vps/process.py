@@ -139,10 +139,24 @@ def main():
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--staging-dir", required=True)
     ap.add_argument("--state-dir", required=True)
-    ap.add_argument("--workers", type=int, default=os.cpu_count() or 2)
+    # Máy 2 GB RAM chạy song song Chromium: chỉ OCR 1 tiến trình để tránh hết bộ nhớ
+    mem_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
+    ap.add_argument("--workers", type=int, default=1 if mem_gb < 3.5 else (os.cpu_count() or 2))
     ap.add_argument("--batch", type=int, default=200, help="Số bản ghi tối đa mỗi lần chạy")
     ap.add_argument("--docx", action="store_true", help="Tạo thêm file DOCX bằng pandoc")
     args = ap.parse_args()
+
+    # Dọn thư mục OCR tạm bị bỏ lại (khi tiến trình OCR bị dừng đột ngột, ví dụ thiếu RAM)
+    import time as _t
+    for d in glob.glob(os.path.join(tempfile.gettempdir(), "ocr_*")):
+        try:
+            if _t.time() - os.path.getmtime(d) > 3600:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+    if shutil.disk_usage(args.staging_dir if os.path.exists(args.staging_dir) else "/").free < 2e9:
+        print("Ổ đĩa còn dưới 2 GB — tạm dừng xử lý, chờ đẩy file lên Drive giải phóng chỗ.")
+        return
 
     os.makedirs(args.state_dir, exist_ok=True)
     state_csv = os.path.join(args.state_dir, "processed.csv")
