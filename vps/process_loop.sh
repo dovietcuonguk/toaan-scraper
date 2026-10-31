@@ -29,6 +29,11 @@ while true; do
     rclone move "$STAGING" "$REMOTE" "${RCLONE_OPTS[@]}" --delete-empty-src-dirs
   fi
 
+  # Một lần: đặt lại tên các bản án trong CHUA DAT TEN (sau khi sửa cách đọc số/ngày)
+  if [ ! -f "$WORK/state/names_fixed_v1" ] && [ -z "$(find "$STAGING" -type f -print -quit)" ]; then
+    "$PY" "$REPO/vps/fix_names.py" >> "$LOG" 2>&1 && touch "$WORK/state/names_fixed_v1"
+  fi
+
   now=$(date +%s)
   if [ $((now - last_report)) -ge 1800 ] || [ -f "$WORK/DOWNLOAD_DONE" ]; then
     "$PY" "$REPO/vps/progress.py" > "$WORK/TIEN_DO.md" 2>>"$LOG"

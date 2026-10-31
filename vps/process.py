@@ -56,7 +56,8 @@ PHASE_CODE = [
     (re.compile(r"Ph[úu]c\s*th[ẩa]m", re.I), "PT"),
     (re.compile(r"S[ơo]\s*th[ẩa]m", re.I), "ST"),
 ]
-SO_NGAY_RE = re.compile(r"s[ốo]\s*([^\s]+)\s*ng[àa]y\s*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})", re.I)
+# Cho phép số hiệu có khoảng trắng bên trong (vd "số 837 /2020/QĐST-DS ngày 24/06/2020")
+SO_NGAY_RE = re.compile(r"s[ốo]\s*(.+?)\s*ng[àa]y\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4})", re.I)
 FIELDNAMES = ["id", "court", "case_type", "status", "final_stem", "dest_dir", "method", "note", "timestamp"]
 
 
