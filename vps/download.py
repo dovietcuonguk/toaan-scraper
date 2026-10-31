@@ -14,6 +14,7 @@ TP. Hồ Chí Minh → Hà Nội → Đà Nẵng, cả 8 loại vụ việc, t�
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -85,6 +86,24 @@ def log(msg):
         f.write(line + "\n")
 
 
+def _ids(path):
+    ids = set()
+    if path.exists():
+        for line in path.open(encoding="utf-8"):
+            try:
+                rid = json.loads(line).get("id")
+            except json.JSONDecodeError:
+                continue
+            if rid:
+                ids.add(rid)
+    return ids
+
+
+def remaining_ids(out):
+    """Số bản ghi đã có trong danh sách nhưng chưa qua bước tải PDF."""
+    return len(_ids(out / "records.jsonl") - _ids(out / "records_full.jsonl"))
+
+
 def existing_bucket(court, case_type):
     """Nhóm đã xong đầu tiên của (Tòa, loại vụ việc): (bucket, dfrom, dto) hoặc None."""
     for m in sorted(MARK.glob(f"{court}__{case_type}__*")):
@@ -146,14 +165,27 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False, expected_tota
                 "bộ lọc năm khi đã chọn Tòa. Nhóm này đã chứa toàn bộ danh sách; bỏ chia năm từ nay.")
             BROKEN_FLAG.parent.mkdir(parents=True, exist_ok=True)
             BROKEN_FLAG.write_text(f"{court}/{case_type}/{bucket}: {ratio:.0%} ngoài khoảng ({n} bản ghi)")
-    import shutil
-    while shutil.disk_usage("/").free < 3e9:
-        log("Ổ đĩa còn dưới 3 GB — tạm dừng tải PDF 10 phút, chờ đẩy file lên Drive")
-        time.sleep(600)
     log(f"[{court}/{case_type}/{bucket}] tải PDF")
-    if not run([PY, "fetch_pdfs.py", "--records-dir", str(out), "--delay", "0.8"], tries=3, wait=60):
-        log(f"[{court}/{case_type}/{bucket}] LỖI tải PDF — để lại, chạy lại sau")
-        return False
+    fails = 0
+    prev = None
+    while True:
+        # Tải theo từng lô 300 file; giữ ổ đĩa luôn trống ít nhất 6 GB (khâu xử lý đẩy file lên Drive sẽ giải phóng chỗ)
+        while shutil.disk_usage("/").free < 6e9:
+            log("Ổ đĩa còn dưới 6 GB — tạm dừng tải PDF 10 phút, chờ khâu xử lý đẩy file lên Drive")
+            time.sleep(600)
+        if not run([PY, "fetch_pdfs.py", "--records-dir", str(out), "--delay", "0.8", "--max-records", "300"],
+                   tries=1, wait=60):
+            fails += 1
+            if fails >= 3:
+                log(f"[{court}/{case_type}/{bucket}] LỖI tải PDF — để lại, chạy lại sau")
+                return False
+            continue
+        rem = remaining_ids(out)
+        if rem == 0 or rem == prev:  # xong, hoặc còn vài bản ghi lỗi tải không giảm được nữa
+            if rem:
+                log(f"[{court}/{case_type}/{bucket}] còn {rem} bản ghi không tải được PDF (bỏ qua)")
+            break
+        prev = rem
     MARK.mkdir(parents=True, exist_ok=True)
     marker.write_text(json.dumps({"bucket": bucket, "dfrom": dfrom, "dto": dto,
                                   "at": datetime.now().isoformat(timespec="seconds")}))

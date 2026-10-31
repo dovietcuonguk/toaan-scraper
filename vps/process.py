@@ -139,9 +139,7 @@ def main():
     ap.add_argument("--data-dir", required=True)
     ap.add_argument("--staging-dir", required=True)
     ap.add_argument("--state-dir", required=True)
-    # Máy 2 GB RAM chạy song song Chromium: chỉ OCR 1 tiến trình để tránh hết bộ nhớ
-    mem_gb = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1e9
-    ap.add_argument("--workers", type=int, default=1 if mem_gb < 3.5 else (os.cpu_count() or 2))
+    ap.add_argument("--workers", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--batch", type=int, default=200, help="Số bản ghi tối đa mỗi lần chạy")
     ap.add_argument("--docx", action="store_true", help="Tạo thêm file DOCX bằng pandoc")
     args = ap.parse_args()
@@ -154,8 +152,9 @@ def main():
                 shutil.rmtree(d, ignore_errors=True)
         except OSError:
             pass
-    if shutil.disk_usage(args.staging_dir if os.path.exists(args.staging_dir) else "/").free < 2e9:
-        print("Ổ đĩa còn dưới 2 GB — tạm dừng xử lý, chờ đẩy file lên Drive giải phóng chỗ.")
+    # Chuyển PDF từ data sang staging cùng ổ đĩa không tốn thêm chỗ; chỉ cần chỗ cho MD và ảnh OCR tạm
+    if shutil.disk_usage("/").free < 4e8:
+        print("Ổ đĩa còn dưới 400 MB — tạm dừng xử lý, chờ đẩy file lên Drive giải phóng chỗ.")
         return
 
     os.makedirs(args.state_dir, exist_ok=True)
