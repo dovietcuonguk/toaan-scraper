@@ -13,6 +13,7 @@ TP. Hồ Chí Minh → Hà Nội → Đà Nẵng, cả 8 loại vụ việc, t�
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -35,6 +36,45 @@ CASE_TYPES = ["dan-su", "hinh-su", "hon-nhan-gia-dinh", "kinh-doanh-thuong-mai",
               "hanh-chinh", "lao-dong", "pha-san", "xu-ly-hanh-chinh"]
 SPLIT_THRESHOLD = 1500
 THIS_YEAR = datetime.now().year
+BROKEN_FLAG = WORK / "state" / "date_filter_ineffective"
+DATE_RE = re.compile(r"ng[àa]y\s*(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})", re.I)
+
+
+def self_update():
+    """Kéo bản mã mới nhất từ GitHub; nếu có thay đổi thì tự khởi động lại tiến trình."""
+    try:
+        old = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "pull", "-q", "--ff-only"], cwd=REPO, capture_output=True, timeout=60)
+        new = subprocess.run(["git", "rev-parse", "HEAD"], cwd=REPO, capture_output=True, text=True).stdout.strip()
+        if old and new and old != new:
+            log(f"Cập nhật mã nguồn {old[:7]} → {new[:7]}, khởi động lại")
+            os.execv(sys.executable, [sys.executable, "-u", str(Path(__file__).resolve())])
+    except Exception as e:  # noqa: BLE001
+        log(f"Không cập nhật được mã nguồn: {e}")
+
+
+def out_of_range_ratio(out_dir, dfrom, dto):
+    """Tỷ lệ bản ghi có ngày ban hành nằm ngoài khoảng lọc (để phát hiện bộ lọc năm không có tác dụng)."""
+    lo = datetime.strptime(dfrom, "%d/%m/%Y")
+    hi = datetime.strptime(dto, "%d/%m/%Y")
+    n = bad = 0
+    p = out_dir / "records.jsonl"
+    if not p.exists():
+        return 0, 0.0
+    for line in p.open(encoding="utf-8"):
+        try:
+            m = DATE_RE.search(json.loads(line).get("so_ngay_toa") or "")
+        except json.JSONDecodeError:
+            continue
+        if not m:
+            continue
+        try:
+            d = datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            continue
+        n += 1
+        bad += not (lo <= d <= hi)
+    return n, (bad / n if n else 0.0)
 
 
 def log(msg):
@@ -45,8 +85,20 @@ def log(msg):
         f.write(line + "\n")
 
 
+def existing_bucket(court, case_type):
+    """Nhóm đã xong đầu tiên của (Tòa, loại vụ việc): (bucket, dfrom, dto) hoặc None."""
+    for m in sorted(MARK.glob(f"{court}__{case_type}__*")):
+        bucket = m.name.split("__", 2)[2]
+        try:
+            info = json.loads(m.read_text())
+            return bucket, info.get("dfrom"), info.get("dto")
+        except (json.JSONDecodeError, OSError):
+            return bucket, None, None
+    return None
+
+
 def buckets_for(expected):
-    if expected <= SPLIT_THRESHOLD:
+    if expected <= SPLIT_THRESHOLD or BROKEN_FLAG.exists():
         return [("tat-ca", None, None)]
     b = [("truoc-2017", "01/01/1990", "31/12/2016")]
     b += [(str(y), f"01/01/{y}", f"31/12/{y}") for y in range(2017, THIS_YEAR + 1)]
@@ -70,6 +122,9 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False):
     marker = MARK / f"{court}__{case_type}__{bucket}"
     if marker.exists() and not refresh:
         return True
+    if BROKEN_FLAG.exists() and not refresh and existing_bucket(court, case_type):
+        # Bộ lọc năm không có tác dụng: một nhóm đã lấy toàn bộ danh sách của (Tòa, loại vụ việc)
+        return True
     if refresh:
         (out / "checkpoint.json").unlink(missing_ok=True)
     value, regex = COURTS[court]
@@ -82,17 +137,26 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False):
     if not run(scrape, tries=4, wait=60):
         log(f"[{court}/{case_type}/{bucket}] LỖI lấy danh sách — để lại, chạy lại sau")
         return False
+    if dfrom:
+        n, ratio = out_of_range_ratio(out, dfrom, dto)
+        if n >= 20 and ratio > 0.3:
+            log(f"[{court}/{case_type}/{bucket}] {ratio:.0%} bản ghi nằm ngoài khoảng ngày lọc — cổng không áp dụng "
+                "bộ lọc năm khi đã chọn Tòa. Nhóm này đã chứa toàn bộ danh sách; bỏ chia năm từ nay.")
+            BROKEN_FLAG.parent.mkdir(parents=True, exist_ok=True)
+            BROKEN_FLAG.write_text(f"{court}/{case_type}/{bucket}: {ratio:.0%} ngoài khoảng ({n} bản ghi)")
     log(f"[{court}/{case_type}/{bucket}] tải PDF")
     if not run([PY, "fetch_pdfs.py", "--records-dir", str(out), "--delay", "0.8"], tries=3, wait=60):
         log(f"[{court}/{case_type}/{bucket}] LỖI tải PDF — để lại, chạy lại sau")
         return False
     MARK.mkdir(parents=True, exist_ok=True)
-    marker.write_text(datetime.now().isoformat(timespec="seconds"))
+    marker.write_text(json.dumps({"bucket": bucket, "dfrom": dfrom, "dto": dto,
+                                  "at": datetime.now().isoformat(timespec="seconds")}))
     log(f"[{court}/{case_type}/{bucket}] XONG")
     return True
 
 
 def main():
+    self_update()
     expected = json.loads((REPO / "vps" / "expected_counts.json").read_text(encoding="utf-8"))
     log("===== Bắt đầu/tiếp tục lượt 1 =====")
     failed = []
@@ -101,6 +165,7 @@ def main():
         for court in COURTS:
             for ct in CASE_TYPES:
                 for bucket, dfrom, dto in buckets_for(expected[court][ct]):
+                    self_update()
                     if not do_bucket(court, ct, bucket, dfrom, dto):
                         failed.append((court, ct, bucket))
         if not failed:
@@ -111,6 +176,10 @@ def main():
     log("===== Lượt 2: cập nhật năm hiện tại và các nhóm không chia năm =====")
     for court in COURTS:
         for ct in CASE_TYPES:
+            if BROKEN_FLAG.exists() and existing_bucket(court, ct):
+                # Quét lại đúng nhóm đang giữ toàn bộ danh sách (khử trùng theo id, không tải lại PDF cũ)
+                do_bucket(court, ct, *existing_bucket(court, ct), refresh=True)
+                continue
             for bucket, dfrom, dto in buckets_for(expected[court][ct]):
                 if bucket in ("tat-ca", str(THIS_YEAR)):
                     do_bucket(court, ct, bucket, dfrom, dto, refresh=True)

@@ -15,6 +15,11 @@ RCLONE_OPTS=(--transfers 4 --checkers 8 --tpslimit 8 --retries 5 --low-level-ret
 
 last_report=0
 while true; do
+  # Tự cập nhật mã nguồn; nếu có bản mới thì chạy lại chính script này (bản mới)
+  old=$(git -C "$REPO" rev-parse HEAD); git -C "$REPO" pull -q --ff-only 2>/dev/null
+  if [ "$old" != "$(git -C "$REPO" rev-parse HEAD)" ]; then
+    echo "$(date '+%F %T') cập nhật mã nguồn, khởi động lại vòng xử lý" >> "$LOG"; exec /bin/bash "$0"
+  fi
   out=$("$PY" "$REPO/vps/process.py" --data-dir "$WORK/data" --staging-dir "$STAGING" \
           --state-dir "$WORK/state" --batch 300 2>&1)
   echo "$(date '+%F %T') $out" | tail -3 >> "$LOG"
