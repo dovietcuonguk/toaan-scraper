@@ -20,13 +20,17 @@ while true; do
   if [ "$old" != "$(git -C "$REPO" rev-parse HEAD)" ]; then
     echo "$(date '+%F %T') cập nhật mã nguồn, khởi động lại vòng xử lý" >> "$LOG"; exec /bin/bash "$0"
   fi
+  # Giữ hàng chờ đẩy lên Drive vừa phải (tối đa ~3000 file) để khâu xử lý không chiếm hết ổ đĩa
+  while [ "$(find "$STAGING" -type f | wc -l)" -gt 3000 ]; do sleep 60; done
   out=$("$PY" "$REPO/vps/process.py" --data-dir "$WORK/data" --staging-dir "$STAGING" \
           --state-dir "$WORK/state" --batch 300 2>&1)
   echo "$(date '+%F %T') $out" | tail -3 >> "$LOG"
 
-  # Đẩy kết quả lên Drive; file chỉ bị xoá khỏi máy chủ sau khi đã lên Drive thành công
-  if [ -n "$(find "$STAGING" -type f -print -quit)" ]; then
-    rclone move "$STAGING" "$REMOTE" "${RCLONE_OPTS[@]}" --delete-empty-src-dirs
+  # Đẩy file lên Drive do vòng upload_loop.sh chạy song song đảm nhận; bật lại nếu chưa chạy
+  pid=$(cat "$WORK/state/upload_loop.pid" 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    nohup /bin/bash "$REPO/vps/upload_loop.sh" >> "$WORK/logs/upload.log" 2>&1 &
+    echo "$(date '+%F %T') khởi động vòng đẩy file lên Drive" >> "$LOG"
   fi
 
   # Một lần: đặt lại tên các bản án trong CHUA DAT TEN (sau khi sửa cách đọc số/ngày)
@@ -45,6 +49,7 @@ while true; do
 
   if [ -f "$WORK/DOWNLOAD_DONE" ] && echo "$out" | grep -q "Không có bản ghi mới" \
      && [ -z "$(find "$STAGING" -type f -print -quit)" ]; then
+    kill "$(cat "$WORK/state/upload_loop.pid" 2>/dev/null)" 2>/dev/null
     date -Iseconds > "$WORK/ALL_DONE"
     "$PY" "$REPO/vps/progress.py" > "$WORK/TIEN_DO.md"
     rclone copyto "$WORK/TIEN_DO.md" "$DEST/_TIEN_DO.md" "${RCLONE_OPTS[@]}"
