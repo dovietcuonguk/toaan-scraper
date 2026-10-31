@@ -110,8 +110,11 @@ def main():
     t0 = time.time()
     with sync_playwright() as p:
         browser = p.chromium.launch(args=["--disable-blink-features=AutomationControlled"])
+        # Cổng không gửi kèm chứng chỉ trung gian; Chromium trên Linux dùng kho chứng chỉ
+        # riêng (NSS) nên có thể báo lỗi chứng chỉ dù hệ điều hành đã được bổ sung.
         ctx = browser.new_context(user_agent=st.USER_AGENT, locale="vi-VN",
-                                  viewport={"width": 1280, "height": 800})
+                                  viewport={"width": 1280, "height": 800},
+                                  ignore_https_errors=True)
         ctx.add_init_script("Object.defineProperty(navigator, 'webdriver', { get: () => undefined });")
         ctx.route(re.compile(r"sendpulse\.com"), lambda route: route.abort())
         page = ctx.new_page()
