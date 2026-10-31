@@ -41,7 +41,7 @@ Sắp hiện một đường link dạng http://127.0.0.1:53682/auth?state=...
   3. Trình duyệt báo "Success" là xong; quay lại cửa sổ Terminal này.
 (Nếu Terminal hỏi thêm câu nào, ví dụ "Shared Drive", cứ gõ n rồi Enter.)
 EOF
-  rclone config create gdrive drive scope=drive root_folder_id="$CONGBOBANAN_ID" \
+  rclone config create gdrive drive scope=drive root_folder_id="$CONGBOBANAN_ID" >/dev/null \
     || { echo "LỖI tạo kết nối Drive. Kiểm tra lại đã đăng nhập bằng: ssh -L 53682:127.0.0.1:53682 root@<IP>"; exit 1; }
 fi
 if ! rclone lsd gdrive: >/dev/null 2>&1; then
