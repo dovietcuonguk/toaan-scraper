@@ -32,6 +32,7 @@ import re
 import signal
 import sys
 import time
+import unicodedata
 from pathlib import Path
 from urllib.parse import urljoin
 
@@ -75,6 +76,10 @@ CASE_TYPES = {
 LEVELS = {
     "toi-cao": ("TW", "TAND tối cao"),
     "cap-cao": ("CW", "TAND cấp cao"),
+    # TAND cấp tỉnh: dùng kèm --court-value để chọn đúng một Tòa trong dropdown
+    # phụ thuộc Ra_Drop_Courts (đã kiểm chứng trên VPS ngày 31/10/2026:
+    # 787 = TAND TP. Hồ Chí Minh, 784 = TAND TP. Hà Nội, 775 = TAND TP Đà Nẵng).
+    "tinh": ("T", "TAND cấp tỉnh"),
 }
 
 # Bộ chọn dự phòng ("main") — dùng khi vì lý do nào đó (đổi giao diện, đổi
@@ -320,6 +325,44 @@ def select_level(page, level_value: str, log: logging.Logger) -> None:
         _select_level_and_settle(page, FALLBACK_SEL["level"], level_value, log)
 
 
+def select_court(page, court_value: str, log: logging.Logger, top: bool = True) -> str:
+    """Chọn một Tòa cụ thể trong dropdown phụ thuộc '...Drop_Courts...' (được nạp
+    lại sau khi chọn cấp xét xử). top=True: bộ '_top' (hiển thị); top=False: bộ
+    'chính' (ẩn, dùng ở nhánh fallback). Trả về nhãn Tòa đã chọn; ném lỗi nếu
+    không tìm thấy giá trị (tránh âm thầm tải nhầm toàn bộ Tòa cấp tỉnh)."""
+    info = page.evaluate(
+        """([value, wantTop]) => {
+            const sels = Array.from(document.querySelectorAll('select'))
+              .filter(s => /Drop_Courts/i.test(s.id) && (s.id.endsWith('_top') === wantTop));
+            for (const s of sels) {
+              const opt = Array.from(s.options).find(o => o.value === value);
+              if (opt) return {id: s.id, text: opt.text.trim(),
+                               visible: !!(s.offsetWidth || s.offsetHeight || s.getClientRects().length)};
+            }
+            return null;
+        }""",
+        [court_value, top],
+    )
+    if not info:
+        raise RuntimeError(f"Không tìm thấy Tòa có mã {court_value} trong dropdown chọn Tòa (top={top})")
+    sel_id = "#" + info["id"]
+    if info["visible"]:
+        try:
+            with page.expect_response(
+                lambda r: r.request.method == "POST" and r.url.split("?")[0].rstrip("/") == LISTING_URL.rstrip("/"),
+                timeout=10000,
+            ):
+                page.select_option(sel_id, value=court_value)
+        except PWTimeout:
+            pass
+        page.wait_for_timeout(1500)
+    else:
+        _set_select_value_js(page, sel_id, court_value)
+        page.wait_for_timeout(1000)
+    log.info(f"Chọn Tòa: {info['text']} (mã {court_value}, {info['id']})")
+    return info["text"]
+
+
 def _set_select_value_js(page, sel_id: str, value: str, by_label: bool = False) -> None:
     """Chọn giá trị cho <select> bằng JS trực tiếp, KHÔNG qua page.select_option()
     của Playwright.
@@ -561,7 +604,8 @@ def run(args):
             # cứ resume theo last_page_done cũ sẽ bỏ sót/đọc sai trang.
             cp_date_from = cp.get("date_from")
             cp_date_to = cp.get("date_to")
-            if cp_date_from != args.date_from or cp_date_to != args.date_to:
+            if (cp_date_from != args.date_from or cp_date_to != args.date_to
+                    or cp.get("court_value") != args.court_value):
                 log.warning(
                     f"Checkpoint cũ ứng với bộ lọc ngày khác "
                     f"(từ={cp_date_from!r}, đến={cp_date_to!r}) so với lần chạy này "
@@ -596,6 +640,7 @@ def run(args):
     signal.signal(signal.SIGINT, handle_sigint)
 
     total_saved_this_run = 0
+    court_re = re.compile(args.court_regex, re.I) if args.court_regex else None
 
     with sync_playwright() as p:
         # --disable-blink-features=AutomationControlled: tắt cờ mà Chromium tự
@@ -725,6 +770,9 @@ def run(args):
                 log.info(f"Chọn cấp xét xử: {level_label} ({level_value})")
                 select_level(page, level_value, log)
                 dismiss_popups(page)
+            if args.court_value:
+                select_court(page, args.court_value, log, top=True)
+                dismiss_popups(page)
 
             log.info(f"Chọn loại vụ/việc: {case_label}")
             select_case_type(page, case_label, log)
@@ -781,6 +829,10 @@ def run(args):
                     log.info(f"  [fallback] Chọn cấp xét xử: {level_label} ({level_value})")
                     _set_select_value_js(page, FALLBACK_SEL["level"], level_value)
                     page.wait_for_timeout(1000)
+                    dismiss_popups(page)
+                if args.court_value:
+                    page.wait_for_timeout(2000)
+                    select_court(page, args.court_value, log, top=False)
                     dismiss_popups(page)
                 log.info(f"  [fallback] Chọn loại vụ/việc: {case_label}")
                 _set_select_value_js(page, FALLBACK_SEL["case_type"], case_label, by_label=True)
@@ -879,8 +931,12 @@ def run(args):
                 soup = BeautifulSoup(html, "html.parser")
                 items = soup.select(".list-group-item")
                 new_count = 0
+                wrong_court = 0
                 for div in items:
                     rec = parse_item(div)
+                    if court_re and not court_re.search(unicodedata.normalize("NFC", rec.get("so_ngay_toa") or "")):
+                        wrong_court += 1
+                        continue
                     if not rec["id"] or rec["id"] in seen_ids:
                         continue
                     rec["loai_vu_viec_loc"] = case_label
@@ -888,6 +944,12 @@ def run(args):
                     seen_ids.add(rec["id"])
                     new_count += 1
                 fout.flush()
+                if wrong_court:
+                    log.warning(f"  Trang {page_num}: bỏ qua {wrong_court}/{len(items)} mục không thuộc Tòa đã chọn")
+                    if items and wrong_court == len(items):
+                        log.error("Toàn bộ trang không thuộc Tòa đã chọn — bộ lọc Tòa không ăn. Dừng để tránh tải nhầm.")
+                        incomplete = True
+                        break
                 total_saved_this_run += new_count
                 log.info(
                     f"Trang {page_num}/{end_page} ({len(items)} mục hiển thị): "
@@ -901,6 +963,7 @@ def run(args):
                             "level": args.level,
                             "date_from": args.date_from,
                             "date_to": args.date_to,
+                            "court_value": args.court_value,
                             "last_page_done": page_num,
                             "total_pages": total_pages,
                             "total_records_on_site": total_records,
@@ -964,6 +1027,10 @@ def parse_args():
             "form tìm kiếm ngày 16/09/2026)."
         ),
     )
+    ap.add_argument("--court-value", default=None,
+                    help="Mã Tòa trong dropdown chọn Tòa (dùng với --level tinh), vd 787 = TAND TP. Hồ Chí Minh")
+    ap.add_argument("--court-regex", default=None,
+                    help="Biểu thức kiểm tra tên Tòa trong 'so_ngay_toa'; bản ghi không khớp sẽ bị bỏ qua")
     ap.add_argument("--start-page", type=int, default=1, help="Trang bắt đầu (mặc định 1)")
     ap.add_argument("--end-page", type=int, default=None, help="Trang kết thúc (mặc định: hết)")
     ap.add_argument(
