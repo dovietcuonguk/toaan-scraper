@@ -116,7 +116,7 @@ def run(cmd, tries, wait):
     return False
 
 
-def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False):
+def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False, expected_total=0):
     out = DATA / court / case_type / bucket
     out.mkdir(parents=True, exist_ok=True)
     marker = MARK / f"{court}__{case_type}__{bucket}"
@@ -137,9 +137,11 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False):
     if not run(scrape, tries=4, wait=60):
         log(f"[{court}/{case_type}/{bucket}] LỖI lấy danh sách — để lại, chạy lại sau")
         return False
-    if dfrom:
+    if dfrom and expected_total:
         n, ratio = out_of_range_ratio(out, dfrom, dto)
-        if n >= 20 and ratio > 0.3:
+        # Chỉ kết luận "bộ lọc năm không có tác dụng" khi nhóm năm này chứa gần như TOÀN BỘ danh sách
+        # (>= 80% số đếm của cả Tòa/loại vụ việc). Một số ít bản ghi lệch năm là do dữ liệu của cổng.
+        if n >= 0.8 * expected_total and ratio > 0.3:
             log(f"[{court}/{case_type}/{bucket}] {ratio:.0%} bản ghi nằm ngoài khoảng ngày lọc — cổng không áp dụng "
                 "bộ lọc năm khi đã chọn Tòa. Nhóm này đã chứa toàn bộ danh sách; bỏ chia năm từ nay.")
             BROKEN_FLAG.parent.mkdir(parents=True, exist_ok=True)
@@ -166,7 +168,7 @@ def main():
             for ct in CASE_TYPES:
                 for bucket, dfrom, dto in buckets_for(expected[court][ct]):
                     self_update()
-                    if not do_bucket(court, ct, bucket, dfrom, dto):
+                    if not do_bucket(court, ct, bucket, dfrom, dto, expected_total=expected[court][ct]):
                         failed.append((court, ct, bucket))
         if not failed:
             break
