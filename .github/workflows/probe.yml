@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   probe:
@@ -20,4 +20,20 @@ jobs:
           pip install playwright httpx
           python -m playwright install --with-deps chromium
       - name: Kiểm tra truy cập congbobanan
-        run: python tools/probe.py
+        run: |
+          set +e
+          timeout 600 python -u tools/probe.py > probe-output.txt 2>&1
+          echo "EXIT_CODE=$?" >> probe-output.txt
+          echo "RUNNER_IP=$(curl -s https://api.ipify.org)" >> probe-output.txt
+          tail -5 probe-output.txt
+      # Kết quả chạy thử chỉ gồm cấu trúc biểu mẫu tìm kiếm (không có nội dung bản án),
+      # đẩy lên nhánh riêng để đọc lại được.
+      - name: Lưu kết quả lên nhánh probe-output
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan probe-output
+          git rm -rq --cached .
+          git add probe-output.txt
+          git commit -qm "Kết quả chạy thử $(date -u +%FT%TZ)"
+          git push -fq origin probe-output
