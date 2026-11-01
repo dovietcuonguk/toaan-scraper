@@ -47,6 +47,17 @@ while true; do
     "$PY" "$REPO/vps/fix_names.py" >> "$LOG" 2>&1 && touch "$WORK/state/names_fixed_v1"
   fi
 
+  # Việc chạy một lần (vps/tasks/*.sh): mỗi việc chạy nền đúng một lần, kết quả ghi log
+  for t in "$REPO"/vps/tasks/*.sh; do
+    [ -f "$t" ] || continue
+    name=$(basename "$t")
+    if [ ! -f "$WORK/state/tasks_done/$name" ]; then
+      mkdir -p "$WORK/state/tasks_done"; touch "$WORK/state/tasks_done/$name"
+      nohup /bin/bash "$t" >> "$WORK/logs/task_$name.log" 2>&1 &
+      echo "$(date '+%F %T') chạy việc một lần: $name" >> "$LOG"
+    fi
+  done
+
   now=$(date +%s)
   if [ $((now - last_report)) -ge 1800 ] || [ -f "$WORK/DOWNLOAD_DONE" ]; then
     "$PY" "$REPO/vps/progress.py" > "$WORK/TIEN_DO.md" 2>>"$LOG"
