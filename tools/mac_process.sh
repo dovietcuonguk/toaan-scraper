@@ -24,7 +24,7 @@ for t in tesseract pdftotext pdftoppm pdfinfo; do command -v $t >/dev/null || { 
 echo "$(date '+%F %T') Bắt đầu. MD → $MD_ROOT | PDF → $PDF_ROOT"
 
 process_inbox() {
-  for d in "$INBOX"/raw-*/; do
+  for d in $(ls -d "$INBOX"/raw-*/ 2>/dev/null | head -1); do
     [ -d "$d" ] || continue
     b=$(basename "$d"); t0=$(date +%s)
     "$PY" "$REPO/mac/process_inbox.py" --inbox "$d" --md-root "$MD_ROOT" --pdf-root "$PDF_ROOT" --state-dir "$STATE" \
@@ -33,15 +33,23 @@ process_inbox() {
     if [ -f "$d/_done.csv" ] && tail -n +$((sent + 1)) "$d/_done.csv" | "${SSH[@]}" 'cat >> /root/work/state/processed_mac.csv'; then
       echo "$lines" > "$d/.sent"
       left=$(find "$d/pdf" -type f 2>/dev/null | wc -l | tr -d ' ')
-      if [ "$left" = "0" ]; then rm -rf "$d"; else echo "  Lô $b còn $left PDF chưa xử lý — giữ lại để chạy lại"; fi
+      if [ "$left" = "0" ]; then rm -rf "$d"
+      elif [ "$sent" != "1" ]; then mkdir -p "$WORKM/failed"; mv "$d" "$WORKM/failed/"; echo "  Lô $b còn $left PDF lỗi — chuyển sang ~/toaan-work/failed"
+      else echo "  Lô $b còn $left PDF chưa xử lý — sẽ chạy lại một lần"; fi
       echo "  (lô $b: $(( $(date +%s) - t0 )) giây)"
     fi
   done
 }
 
+# Xử lý (OCR) chạy nền, song song với việc kéo lô kế tiếp; giữ tối đa 2 lô chờ trên máy
+proc_pid=""
 total=0
 while true; do
-  process_inbox
+  if [ -z "$proc_pid" ] || ! kill -0 "$proc_pid" 2>/dev/null; then
+    if ls -d "$INBOX"/raw-*/ >/dev/null 2>&1; then process_inbox & proc_pid=$!; fi
+  fi
+  waiting=$(ls -d "$INBOX"/raw-*/ 2>/dev/null | wc -l | tr -d ' ')
+  if [ "$waiting" -ge 2 ]; then sleep 30; continue; fi
   free_gb=$(df -g "$HOME" | awk 'NR==2{print $4}')
   if [ "${free_gb:-0}" -lt "$MIN_FREE_GB" ]; then
     echo "$(date '+%F %T') MacBook còn ${free_gb} GB trống — chờ 10 phút cho Google Drive đồng bộ bớt"
@@ -51,15 +59,18 @@ while true; do
   if [ -z "$batches" ]; then
     echo "$(date '+%F %T') Chưa có file mới. Đã nhận tổng cộng: $total file."
     "${SSH[@]}" 'grep -E "^Hoàn thành" /root/work/TIEN_DO.md 2>/dev/null' || true
-    "${SSH[@]}" 'test -f /root/work/ALL_DONE' && { echo "VPS đã xong toàn bộ."; exit 0; }
+    if "${SSH[@]}" 'test -f /root/work/ALL_DONE' && [ "$waiting" = "0" ] && ! kill -0 "${proc_pid:-0}" 2>/dev/null; then
+      echo "VPS đã xong toàn bộ."; exit 0
+    fi
     sleep 300; continue
   fi
   while read -r b n; do
     [ -z "$b" ] && continue
-    case "$b" in raw-*) dest="$INBOX/$b";; *) dest="$OLD_DEST";; esac
+    case "$b" in raw-*) dest="$INBOX/.tmp-$b"; rm -rf "$dest";; *) dest="$OLD_DEST";; esac
     mkdir -p "$dest"
     got=$("${SSH[@]}" "tar -C /root/work/outbox/$b -cf - ." | tar -C "$dest" -xvf - 2>&1 | grep '^x ' | grep -vc '/$')
     if [ "$got" -ge "$n" ]; then
+      case "$b" in raw-*) mv "$dest" "$INBOX/$b";; esac   # chỉ hiện ra cho khâu xử lý khi đã nhận đủ
       "${SSH[@]}" "rm -rf /root/work/outbox/$b"
       total=$((total + n))
       echo "$(date '+%F %T') Lô $b: đã nhận $n file (tổng $total)"
