@@ -13,6 +13,15 @@ mkdir -p "$STAGING" "$WORK/logs" "$WORK/state"
 RCLONE_OPTS=(--transfers 4 --checkers 8 --tpslimit 8 --retries 5 --low-level-retries 10
              --log-file "$WORK/logs/rclone.log" --log-level NOTICE)
 
+ensure_uploader() {
+  # Đẩy file lên Drive do vòng upload_loop.sh chạy song song đảm nhận; bật lại nếu chưa chạy
+  local pid; pid=$(cat "$WORK/state/upload_loop.pid" 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+    nohup /bin/bash "$REPO/vps/upload_loop.sh" >> "$WORK/logs/upload.log" 2>&1 &
+    echo "$(date '+%F %T') khởi động vòng đẩy file lên Drive" >> "$LOG"
+  fi
+}
+
 last_report=0
 while true; do
   # Tự cập nhật mã nguồn; nếu có bản mới thì chạy lại chính script này (bản mới)
@@ -21,17 +30,12 @@ while true; do
     echo "$(date '+%F %T') cập nhật mã nguồn, khởi động lại vòng xử lý" >> "$LOG"; exec /bin/bash "$0"
   fi
   # Giữ hàng chờ đẩy lên Drive vừa phải (tối đa ~3000 file) để khâu xử lý không chiếm hết ổ đĩa
-  while [ "$(find "$STAGING" -type f | wc -l)" -gt 3000 ]; do sleep 60; done
+  ensure_uploader
+  while [ "$(find "$STAGING" -type f | wc -l)" -gt 3000 ]; do ensure_uploader; sleep 60; done
   out=$("$PY" "$REPO/vps/process.py" --data-dir "$WORK/data" --staging-dir "$STAGING" \
           --state-dir "$WORK/state" --batch 300 2>&1)
   echo "$(date '+%F %T') $out" | tail -3 >> "$LOG"
 
-  # Đẩy file lên Drive do vòng upload_loop.sh chạy song song đảm nhận; bật lại nếu chưa chạy
-  pid=$(cat "$WORK/state/upload_loop.pid" 2>/dev/null)
-  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
-    nohup /bin/bash "$REPO/vps/upload_loop.sh" >> "$WORK/logs/upload.log" 2>&1 &
-    echo "$(date '+%F %T') khởi động vòng đẩy file lên Drive" >> "$LOG"
-  fi
 
   # Một lần: đặt lại tên các bản án trong CHUA DAT TEN (sau khi sửa cách đọc số/ngày)
   if [ ! -f "$WORK/state/names_fixed_v1" ] && [ -z "$(find "$STAGING" -type f -print -quit)" ]; then

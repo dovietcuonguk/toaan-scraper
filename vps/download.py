@@ -173,6 +173,7 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False, expected_tota
         while shutil.disk_usage("/").free < 6e9:
             log("Ổ đĩa còn dưới 6 GB — tạm dừng tải PDF 10 phút, chờ khâu xử lý đẩy file lên Drive")
             time.sleep(600)
+            self_update()
         if not run([PY, "fetch_pdfs.py", "--records-dir", str(out), "--delay", "0.8", "--max-records", "300"],
                    tries=1, wait=60):
             fails += 1
