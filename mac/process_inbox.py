@@ -24,6 +24,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "vps"))
 sys.path.insert(0, str(HERE))
 import process as P  # noqa: E402  (vps/process.py: đặt tên, trích văn bản/OCR)
+import glob  # noqa: E402
+import subprocess  # noqa: E402
+import tempfile  # noqa: E402
 import frontmatter as FM  # noqa: E402
 
 LEVEL_DIR = {"tinh": "CAP TINH", "huyen": "CAP HUYEN - KHU VUC", "khu-vuc": "CAP HUYEN - KHU VUC"}
@@ -34,6 +37,56 @@ CASE_LABEL = {
 }
 
 
+def _ocr_pages(pdf_path, pages, tmpdir):
+    out = []
+    for pg in pages:
+        base = os.path.join(tmpdir, f"p{pg}")
+        subprocess.run(["pdftoppm", "-f", str(pg), "-l", str(pg), "-r", "200", "-png", pdf_path, base],
+                       capture_output=True, timeout=300, check=False)
+        for png in sorted(glob.glob(base + "*.png")):
+            r = subprocess.run(["tesseract", png, "stdout", "-l", "vie", "--psm", "4"], capture_output=True,
+                               text=True, timeout=180, env={**os.environ, "OMP_THREAD_LIMIT": "1"})
+            out.append((pg, r.stdout or ""))
+    return out
+
+
+def extract(pdf_path, partial=True):
+    """Trả về (văn bản, phương pháp, số trang). PDF có lớp chữ: lấy toàn văn (NATIVE).
+    PDF ảnh scan, partial=True và > 3 trang: chỉ OCR trang 1, 2 và trang cuối (OCR_MOT_PHAN);
+    phần còn lại OCR sau bằng mac/ocr_full.py."""
+    try:
+        t = subprocess.run(["pdftotext", "-layout", pdf_path, "-"], capture_output=True, text=True, timeout=120).stdout or ""
+    except Exception:  # noqa: BLE001
+        t = ""
+    npages = 1
+    try:
+        info = subprocess.run(["pdfinfo", pdf_path], capture_output=True, text=True, timeout=30).stdout or ""
+        for line in info.splitlines():
+            if line.startswith("Pages:"):
+                npages = int(line.split(":")[1].strip())
+    except Exception:  # noqa: BLE001
+        pass
+    if len(t.strip()) >= 60:
+        return t, "NATIVE", npages
+    tmpdir = tempfile.mkdtemp(prefix="ocr_")
+    try:
+        if partial and npages > 3:
+            pages, method = [1, 2, npages], "OCR_MOT_PHAN"
+        else:
+            pages, method = list(range(1, min(npages, 80) + 1)), "OCR"
+        res = _ocr_pages(pdf_path, pages, tmpdir)
+        parts = []
+        for i, (pg, txt) in enumerate(res):
+            if method == "OCR_MOT_PHAN" and pg == npages and npages > 3:
+                parts.append(f"[… trang 3–{npages - 1} chưa OCR, xem PDF gốc …]")
+            parts.append(txt)
+        return "\n\n".join(parts), method, npages
+    except Exception as e:  # noqa: BLE001
+        return "", f"ERROR:{e}", npages
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--inbox", required=True)
@@ -42,6 +95,7 @@ def main():
     ap.add_argument("--pdf-label", default="BANAN PDF", help="Tên thư mục PDF ghi vào khối thông tin")
     ap.add_argument("--state-dir", required=True)
     ap.add_argument("--workers", type=int, default=max(2, (os.cpu_count() or 4) - 1))
+    ap.add_argument("--full-ocr", action="store_true", help="OCR toàn bộ các trang ngay (mặc định: OCR một phần)")
     a = ap.parse_args()
 
     inbox = Path(a.inbox)
@@ -61,14 +115,14 @@ def main():
     state_csv = Path(a.state_dir) / "processed_mac.csv"
     stats = {"ok": 0, "thieu": 0, "loi": 0, "ocr": 0}
     with ProcessPoolExecutor(max_workers=a.workers) as ex:
-        futs = {ex.submit(P.extract_text, str(inbox / r["pdf_rel"])): r for r in todo}
+        futs = {ex.submit(extract, str(inbox / r["pdf_rel"]), not a.full_ocr): r for r in todo}
         for fut in as_completed(futs):
             rec = futs[fut]
             try:
-                text, method = fut.result()
+                text, method, npages = fut.result()
             except Exception as e:  # noqa: BLE001
-                text, method = "", f"ERROR:{e}"
-            row = write_one(a, inbox, rec, text, method, stats)
+                text, method, npages = "", f"ERROR:{e}", 0
+            row = write_one(a, inbox, rec, text, method, stats, npages)
             for path, header in ((state_csv, not state_csv.exists()), (done_csv, not done_csv.exists())):
                 with open(path, "a", newline="", encoding="utf-8") as f:
                     w = csv.DictWriter(f, fieldnames=P.FIELDNAMES)
@@ -80,10 +134,10 @@ def main():
     return 0 if stats["loi"] == 0 else 1
 
 
-def write_one(a, inbox, rec, text, method, stats):
+def write_one(a, inbox, rec, text, method, stats, npages=0):
     court, case_type, rid = rec["court"], rec["case_type"], rec["id"]
     level = rec.get("cap", "tinh")
-    if method == "OCR":
+    if method.startswith("OCR"):
         stats["ocr"] += 1
     rel = Path(P.COURT_DIR[court]) / LEVEL_DIR[level] / P.CASE_TYPE_DIR[case_type]
     stem = P.build_stem(rec, court, case_type)
@@ -111,7 +165,9 @@ def write_one(a, inbox, rec, text, method, stats):
         "tham_phan": nguoi["tham_phan"],
         "thu_ky": nguoi["thu_ky"],
         "kiem_sat_vien": nguoi["kiem_sat_vien"],
-        "kiem_tra_ten": method == "OCR",
+        "kiem_tra_ten": method.startswith("OCR"),
+        "ocr_mot_phan": method == "OCR_MOT_PHAN",
+        "so_trang": npages,
         "ap_dung_an_le": rec.get("ap_dung_an_le", ""),
         "dinh_chinh": rec.get("dinh_chinh", ""),
         "ma_cong": rid,
