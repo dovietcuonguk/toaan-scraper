@@ -11,6 +11,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 WORK = Path(os.environ.get("TOAAN_WORK", "/root/work"))
+FIELDNAMES = ["id", "court", "case_type", "status", "final_stem", "dest_dir", "method", "note", "timestamp"]
 NAMES = {"tp-hcm": "TAND TP. Hồ Chí Minh", "ha-noi": "TAND TP. Hà Nội", "da-nang": "TAND TP. Đà Nẵng"}
 
 
@@ -42,7 +43,11 @@ def main():
         if not st.exists():
             continue
         with st.open(encoding="utf-8-sig") as f:
-            for row in csv.DictReader(f):
+            # processed_mac.csv (MacBook gửi về) không có dòng tiêu đề
+            rd = csv.DictReader(f, fieldnames=FIELDNAMES) if st.name == "processed_mac.csv" else csv.DictReader(f)
+            for row in rd:
+                if row.get("id") in (None, "id") or not row.get("court"):
+                    continue
                 k = (row["court"], row["case_type"])
                 if row["status"] in ("OK", "THIEU"):
                     done[k] += 1
