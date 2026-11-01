@@ -14,6 +14,11 @@ RCLONE_OPTS=(--transfers 4 --checkers 8 --tpslimit 8 --retries 5 --low-level-ret
              --log-file "$WORK/logs/rclone.log" --log-level NOTICE)
 
 ensure_uploader() {
+  # Chế độ MacBook tự kéo file về (tools/mac_pull.sh): không đẩy lên Drive từ máy chủ
+  if [ -f "$WORK/state/MAC_PULL" ]; then
+    pkill -f "rclone move $STAGING" 2>/dev/null; pkill -f vps/upload_loop.sh 2>/dev/null
+    return
+  fi
   # Đẩy file lên Drive do vòng upload_loop.sh chạy song song đảm nhận; bật lại nếu chưa chạy
   local pid; pid=$(cat "$WORK/state/upload_loop.pid" 2>/dev/null)
   if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
@@ -52,7 +57,7 @@ while true; do
   fi
 
   if [ -f "$WORK/DOWNLOAD_DONE" ] && echo "$out" | grep -q "Không có bản ghi mới" \
-     && [ -z "$(find "$STAGING" -type f -print -quit)" ]; then
+     && [ -z "$(find "$STAGING" "$WORK/outbox" -type f -print -quit 2>/dev/null)" ]; then
     kill "$(cat "$WORK/state/upload_loop.pid" 2>/dev/null)" 2>/dev/null
     date -Iseconds > "$WORK/ALL_DONE"
     "$PY" "$REPO/vps/progress.py" > "$WORK/TIEN_DO.md"

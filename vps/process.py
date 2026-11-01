@@ -241,7 +241,9 @@ def main():
                 for sub in {sub_pdf, sub_md}:
                     (dest_root / sub).mkdir(parents=True, exist_ok=True)
                 md_path = dest_root / sub_md / f"{final_stem}.md"
-                md_path.write_text("\n".join(header) + body, encoding="utf-8")
+                tmp_md = md_path.with_name(md_path.name + ".tmp")  # ghi tạm rồi đổi tên: không ai lấy được file MD ghi dở
+                tmp_md.write_text("\n".join(header) + body, encoding="utf-8")
+                os.replace(tmp_md, md_path)
                 if args.docx:
                     (dest_root / sub_docx).mkdir(parents=True, exist_ok=True)
                     subprocess.run(["pandoc", str(md_path), "-o", str(dest_root / sub_docx / f"{final_stem}.docx")],
