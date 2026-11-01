@@ -23,6 +23,9 @@ import unicodedata
 from pathlib import Path
 
 ROOT = Path(os.environ.get("MDBANAN", Path.home() / "My Drive" / "000 - OBSIDIAN" / "MDBANAN"))
+# CSDL làm việc để ngoài Google Drive (SQLite không nên ghi trực tiếp trong thư mục đồng bộ);
+# sau mỗi lần cập nhật chép một bản sang MDBANAN/_INDEX/banan.db để máy khác / Claude đọc.
+DB = Path(os.environ.get("BANAN_DB", Path.home() / "toaan-work" / "banan.db"))
 FIELDS = ["toa", "cap", "loai_vu_viec", "so", "ngay", "loai_van_ban", "cap_xet_xu", "quan_he_phap_luat",
           "ocr_mot_phan", "kiem_tra_ten", "ma_cong", "nguon", "pdf", "trich_xuat"]
 ROLES = ["tham_phan", "thu_ky", "kiem_sat_vien"]
@@ -38,15 +41,11 @@ def vn(n):
     return f"{n:,}".replace(",", ".")
 
 
-def db_path(root):
+def snapshot_path(root):
     return Path(root) / "_INDEX" / "banan.db"
 
 
-def connect(root):
-    p = db_path(root)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(p)
-    con.executescript("""
+SCHEMA = """
     CREATE TABLE IF NOT EXISTS banan(
       path TEXT PRIMARY KEY, mtime REAL, ma_noi TEXT, nhom TEXT, cap_toa TEXT, loai_thu_muc TEXT,
       toa TEXT, cap TEXT, loai_vu_viec TEXT, so TEXT, ngay TEXT, nam INTEGER, loai_van_ban TEXT,
@@ -57,8 +56,20 @@ def connect(root):
     CREATE INDEX IF NOT EXISTS i_nguoi_path ON nguoi(path);
     CREATE INDEX IF NOT EXISTS i_ngay ON banan(ngay);
     CREATE INDEX IF NOT EXISTS i_ma_cong ON banan(ma_cong);
-    """)
-    return con
+"""
+
+
+def connect(root, db=None, write=False):
+    db = Path(db or DB)
+    if write or db.exists():
+        db.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(db)
+        con.executescript(SCHEMA)
+        return con
+    snap = snapshot_path(root)  # máy không có CSDL làm việc: đọc bản sao trong Drive (chỉ đọc)
+    if not snap.exists():
+        sys.exit("Chưa có chỉ mục. Chạy: python3 banan_index.py capnhat")
+    return sqlite3.connect(f"file:{snap}?immutable=1", uri=True)
 
 
 def read_frontmatter(path):
@@ -78,10 +89,10 @@ def read_frontmatter(path):
     return fm
 
 
-def capnhat(root, quiet=False):
+def capnhat(root, quiet=False, db=None):
     t0 = time.time()
     root = Path(root)
-    con = connect(root)
+    con = connect(root, db, write=True)
     known = dict(con.execute("SELECT path, mtime FROM banan"))
     seen, n_new = set(), 0
     for dp, dns, fns in os.walk(root):
@@ -128,6 +139,15 @@ def capnhat(root, quiet=False):
         con.execute("DELETE FROM nguoi WHERE path=?", (rel,))
     con.commit()
     total = con.execute("SELECT COUNT(*) FROM banan").fetchone()[0]
+    snap = snapshot_path(root)
+    try:  # chép bản sao vào Drive (ghi tạm rồi đổi tên)
+        snap.parent.mkdir(parents=True, exist_ok=True)
+        bk = sqlite3.connect(str(snap) + ".tmp")
+        con.backup(bk)
+        bk.close()
+        os.replace(str(snap) + ".tmp", snap)
+    except Exception as e:  # noqa: BLE001
+        print(f"(Không chép được bản sao chỉ mục vào {snap}: {e})")
     if not quiet:
         print(f"Chỉ mục: {vn(total)} bản án (mới/cập nhật {vn(n_new)}, bỏ {vn(len(gone))}) — {time.time() - t0:.0f} giây")
     return con
@@ -171,7 +191,7 @@ def where_clause(a):
 
 
 def cmd_tim(a):
-    con = capnhat(a.root, quiet=True) if a.capnhat else connect(a.root)
+    con = capnhat(a.root, quiet=True, db=a.db) if a.capnhat else connect(a.root, a.db)
     w, p = where_clause(a)
     rows = con.execute(f"SELECT ngay, ma_noi, so, quan_he_phap_luat, tham_phan, path, pdf FROM banan{w} "
                        f"ORDER BY ngay DESC LIMIT ?", p + [a.limit]).fetchall()
@@ -191,7 +211,7 @@ def cmd_tim(a):
 
 
 def cmd_thongke(a):
-    con = capnhat(a.root, quiet=True) if a.capnhat else connect(a.root)
+    con = capnhat(a.root, quiet=True, db=a.db) if a.capnhat else connect(a.root, a.db)
     w, p = where_clause(a)
     n = con.execute(f"SELECT COUNT(*) FROM banan{w}", p).fetchone()[0]
     print(f"Tổng: {vn(n)} bản án")
@@ -205,7 +225,7 @@ def cmd_thongke(a):
 
 
 def cmd_nguoi(a):
-    con = capnhat(a.root, quiet=True) if a.capnhat else connect(a.root)
+    con = capnhat(a.root, quiet=True, db=a.db) if a.capnhat else connect(a.root, a.db)
     a.tham_phan = a.nguoi = None
     w, p = where_clause(a)
     role = a.vai_tro or "tham_phan"
@@ -220,6 +240,7 @@ def cmd_nguoi(a):
 def main():
     ap = argparse.ArgumentParser(description="Chỉ mục bản án MDBANAN")
     ap.add_argument("--root", default=str(ROOT))
+    ap.add_argument("--db", default=None, help="CSDL làm việc (mặc định ~/toaan-work/banan.db)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("capnhat", help="Cập nhật chỉ mục (chỉ đọc file mới/sửa)")
     for name in ("tim", "thongke", "nguoi"):
@@ -241,7 +262,7 @@ def main():
         s.add_argument("--capnhat", action="store_true", help="Cập nhật chỉ mục trước khi tìm")
     a = ap.parse_args()
     if a.cmd == "capnhat":
-        capnhat(a.root)
+        capnhat(a.root, db=a.db)
     elif a.cmd == "tim":
         cmd_tim(a)
     elif a.cmd == "thongke":
