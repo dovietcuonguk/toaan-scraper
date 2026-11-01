@@ -38,8 +38,9 @@ def main():
     done = defaultdict(int)
     ocr = defaultdict(int)
     issues = defaultdict(int)
-    st = WORK / "state" / "processed.csv"
-    if st.exists():
+    for st in (WORK / "state" / "processed.csv", WORK / "state" / "processed_mac.csv"):
+        if not st.exists():
+            continue
         with st.open(encoding="utf-8-sig") as f:
             for row in csv.DictReader(f):
                 k = (row["court"], row["case_type"])

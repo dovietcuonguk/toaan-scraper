@@ -37,9 +37,16 @@ while true; do
   # Giữ hàng chờ đẩy lên Drive vừa phải (tối đa ~3000 file) để khâu xử lý không chiếm hết ổ đĩa
   ensure_uploader
   while [ "$(find "$STAGING" -type f | wc -l)" -gt 3000 ]; do ensure_uploader; sleep 60; done
-  out=$("$PY" "$REPO/vps/process.py" --data-dir "$WORK/data" --staging-dir "$STAGING" \
-          --state-dir "$WORK/state" --batch 300 2>&1)
-  echo "$(date '+%F %T') $out" | tail -3 >> "$LOG"
+  if [ -f "$WORK/state/MAC_PROCESS" ]; then
+    # MacBook đảm nhận OCR và tạo MD (tools/mac_process.sh); VPS chỉ tải PDF và gửi lô thô
+    pending=$("$PY" "$REPO/vps/outbox_raw.py" --pending 2>/dev/null || echo 1)
+    if [ "${pending:-1}" = "0" ]; then out="Không có bản ghi mới cần xử lý."; else out="Chờ MacBook xử lý: $pending bản ghi"; fi
+    sleep 60
+  else
+    out=$("$PY" "$REPO/vps/process.py" --data-dir "$WORK/data" --staging-dir "$STAGING" \
+            --state-dir "$WORK/state" --batch 300 2>&1)
+    echo "$(date '+%F %T') $out" | tail -3 >> "$LOG"
+  fi
 
 
   # Một lần: đặt lại tên các bản án trong CHUA DAT TEN (sau khi sửa cách đọc số/ngày)
