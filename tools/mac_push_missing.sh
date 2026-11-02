@@ -22,13 +22,14 @@ EXC=(--exclude '.DS_Store' --exclude '._*' --exclude '.*.tmp' --exclude '*.gdoc'
      --exclude 'Icon?' --exclude '.tmp.drivedownload' --exclude '.tmp.driveupload')
 mkdir -p "$NEW/$REL"
 if [ "$MODE" != "--that" ]; then
-  n=0; t=0
-  while IFS= read -r -d '' f; do
-    t=$((t + 1)); r="${f#"$BAK/$REL/"}"
-    case "$r" in *.gdoc|*.gsheet|*.gslides|*.gform|*.gdraw|*.gmap|*.gsite|*.DS_Store|*/._*|._*) continue;; esac
-    [ -e "$NEW/$REL/$r" ] || n=$((n + 1))
-  done < <(find "$BAK/$REL" -type f -print0)
-  echo "CHẠY THỬ: \"$REL\" có $t file ở bản cũ; $n file chưa có ở bản Stream (sẽ được đưa lên mây)."
+  # rsync so khớp cây thư mục nhanh hơn nhiều so với kiểm tra từng file; in danh sách vào ~/toaan-work
+  LIST="$HOME/toaan-work/thieu_$(echo "$REL" | tr '/ ' '__').txt"
+  mkdir -p "$HOME/toaan-work"
+  "$RSYNC" -a --ignore-existing --dry-run --out-format='%n' "${EXC[@]}" "$BAK/$REL/" "$NEW/$REL/" 2>/dev/null \
+    | grep -v '/$' > "$LIST"
+  n=$(wc -l < "$LIST" | tr -d ' ')
+  echo "CHẠY THỬ: \"$REL\": $n file chưa có ở bản Stream (sẽ được đưa lên mây). Danh sách: $LIST"
+  [ "$n" -gt 0 ] && { echo "Theo thư mục cấp 1:"; cut -d/ -f1 "$LIST" | sort | uniq -c | sort -rn | head -15; }
   exit 0
 fi
 free_gb=$(df -g "$HOME" | awk 'NR==2{print $4}')
