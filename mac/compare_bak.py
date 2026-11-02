@@ -58,7 +58,7 @@ def main():
     t0 = time.time()
     with OUT.open("w", encoding="utf-8") as fo:
         for top in tops:
-            if top in SKIP_NAME or top.startswith("."):
+            if top in SKIP_NAME or top.startswith(".") or top.endswith(SKIP_EXT):
                 continue
             a = files(BAK / top)
             if not a:
