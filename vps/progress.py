@@ -48,6 +48,8 @@ def main():
             for row in rd:
                 if row.get("id") in (None, "id") or not row.get("court"):
                     continue
+                if "CAP HUYEN" in (row.get("dest_dir") or ""):  # đợt 2: xem vps/upload_pdf2.py --status
+                    continue
                 k = (row["court"], row["case_type"])
                 if row["status"] in ("OK", "THIEU"):
                     done[k] += 1

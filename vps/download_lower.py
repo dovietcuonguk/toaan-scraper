@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""Đợt 2: lấy danh sách + tải PDF bản án TAND cấp huyện (cũ) và TAND khu vực, theo từng Tòa.
+
+Chạy trên VPS (--cities tp-hcm) hoặc MacBook (--cities ha-noi,da-nang). Mỗi Tòa có trên 1.500 bản án được
+chia theo năm ban hành; không lọc loại vụ việc (loại vụ việc lấy từ bản ghi). Dữ liệu:
+  <work>/data2/<city>/<mã Tòa>/<nhóm>/{records.jsonl, records_full.jsonl, pdfs/}
+Xong mỗi nhóm ghi dấu <work>/state/done2/<mã Tòa>__<nhóm>; xong hết ghi <work>/DOWNLOAD2_DONE.
+"""
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lower_courts  # noqa: E402
+
+THIS_YEAR = datetime.now().year
+SPLIT = 1500
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cities", required=True, help="tp-hcm hoặc ha-noi,da-nang")
+    ap.add_argument("--work", default=os.environ.get("TOAAN_WORK", "/root/work"))
+    ap.add_argument("--courts-json", default=None)
+    ap.add_argument("--python", default=str(REPO / ".venv" / "bin" / "python"))
+    ap.add_argument("--min-free-gb", type=float, default=6)
+    ap.add_argument("--headless", action="store_true", default=True)
+    a = ap.parse_args()
+    work = Path(a.work).expanduser().resolve()
+    data, mark, logf = work / "data2", work / "state" / "done2", work / "logs" / "download2.log"
+    logf.parent.mkdir(parents=True, exist_ok=True)
+
+    def log(msg):
+        line = f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}"
+        print(line, flush=True)
+        with logf.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+
+    def run(cmd, tries, wait):
+        for i in range(1, tries + 1):
+            with logf.open("a", encoding="utf-8") as f:
+                rc = subprocess.run(cmd, cwd=REPO, stdout=f, stderr=subprocess.STDOUT).returncode
+            if rc == 0:
+                return True
+            log(f"   lần {i}/{tries} lỗi (mã {rc}); nghỉ {wait}s")
+            time.sleep(wait)
+        return False
+
+    def ids(p):
+        s = set()
+        if p.exists():
+            for line in p.open(encoding="utf-8"):
+                try:
+                    s.add(json.loads(line).get("id"))
+                except json.JSONDecodeError:
+                    pass
+        s.discard(None)
+        return s
+
+    def buckets(c):
+        if c["total"] <= SPLIT:
+            return [("tat-ca", None, None)]
+        start = 2025 if c["kind"] == "khu-vuc" else 2017
+        b = [] if c["kind"] == "khu-vuc" else [("truoc-2017", "01/01/1990", "31/12/2016")]
+        return b + [(str(y), f"01/01/{y}", f"31/12/{y}") for y in range(start, THIS_YEAR + 1)]
+
+    def do(c, bucket, dfrom, dto, refresh=False):
+        out = data / c["city"] / c["value"] / bucket
+        out.mkdir(parents=True, exist_ok=True)
+        mk = mark / f"{c['value']}__{bucket}"
+        if mk.exists() and not refresh:
+            return True
+        if refresh:
+            (out / "checkpoint.json").unlink(missing_ok=True)
+        cmd = [a.python, "scrape_toaan.py", "--case-type", "tat-ca", "--level", "huyen", "--court-value", c["value"],
+               "--out-dir", str(out), "--resume", "--delay", "1.5"]
+        if dfrom:
+            cmd += ["--date-from", dfrom, "--date-to", dto]
+        tag = f"[{c['ma_noi']} {bucket}]"
+        log(f"{tag} lấy danh sách{' (cập nhật)' if refresh else ''}")
+        if not run(cmd, 4, 60):
+            log(f"{tag} LỖI lấy danh sách — để lại")
+            return False
+        prev, fails = None, 0
+        while True:
+            while shutil.disk_usage(str(work)).free < a.min_free_gb * 1e9:
+                log(f"Ổ còn dưới {a.min_free_gb:.0f} GB — tạm dừng tải 10 phút")
+                time.sleep(600)
+            if not run([a.python, "fetch_pdfs.py", "--records-dir", str(out), "--delay", "0.8",
+                        "--max-records", "300"], 1, 60):
+                fails += 1
+                if fails >= 3:
+                    log(f"{tag} LỖI tải PDF — để lại")
+                    return False
+                continue
+            rem = len(ids(out / "records.jsonl") - ids(out / "records_full.jsonl"))
+            if rem == 0 or rem == prev:
+                if rem:
+                    log(f"{tag} còn {rem} bản ghi không tải được PDF (bỏ qua)")
+                break
+            prev = rem
+        # Ghi kèm thông tin Tòa vào thư mục để khâu tạo MD dùng
+        (out / "court.json").write_text(json.dumps(c, ensure_ascii=False), encoding="utf-8")
+        mark.mkdir(parents=True, exist_ok=True)
+        mk.write_text(datetime.now().isoformat(timespec="seconds"))
+        log(f"{tag} XONG ({len(ids(out / 'records_full.jsonl'))} bản ghi)")
+        return True
+
+    cities = [x.strip() for x in a.cities.split(",") if x.strip()]
+    cj = a.courts_json or str(work / "count_lower.json")
+    courts = lower_courts.load(cj, cities)
+    log(f"===== Đợt 2: {len(courts)} Tòa ({', '.join(cities)}), "
+        f"{sum(c['total'] for c in courts):,} bản án theo số đếm =====".replace(",", "."))
+    failed = []
+    for _ in range(3):
+        failed = []
+        for c in courts:
+            for b, f_, t_ in buckets(c):
+                # court.json cần có ngay cả khi nhóm đang tải dở (khâu tạo MD đọc song song)
+                d = data / c["city"] / c["value"] / b
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "court.json").write_text(json.dumps(c, ensure_ascii=False), encoding="utf-8")
+                if not do(c, b, f_, t_):
+                    failed.append((c["ma_noi"], b))
+        if not failed:
+            break
+        log(f"Còn {len(failed)} nhóm lỗi, nghỉ 15 phút rồi thử lại: {failed[:10]}")
+        time.sleep(900)
+    log("===== Lượt cập nhật: năm hiện tại và các Tòa không chia năm =====")
+    for c in courts:
+        for b, f_, t_ in buckets(c):
+            if b in ("tat-ca", str(THIS_YEAR)):
+                do(c, b, f_, t_, refresh=True)
+    (work / "DOWNLOAD2_DONE").write_text(datetime.now().isoformat(timespec="seconds"))
+    log(f"===== HOÀN TẤT đợt 2 ({', '.join(cities)}). Nhóm còn lỗi: {failed or 'không'} =====")
+
+
+if __name__ == "__main__":
+    main()

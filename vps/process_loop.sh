@@ -60,7 +60,13 @@ while true; do
     name=$(basename "$t")
     if [ ! -f "$WORK/state/tasks_done/$name" ]; then
       mkdir -p "$WORK/state/tasks_done"; touch "$WORK/state/tasks_done/$name"
-      nohup /bin/bash "$t" >> "$WORK/logs/task_$name.log" 2>&1 &
+      # Chạy thành đơn vị systemd riêng: không bị dừng theo khi vòng xử lý này kết thúc
+      if command -v systemd-run >/dev/null 2>&1; then
+        systemd-run --collect --unit "toaan-task-${name%.sh}" /bin/bash -c "/bin/bash '$t' >> '$WORK/logs/task_$name.log' 2>&1" >/dev/null 2>&1 \
+          || nohup /bin/bash "$t" >> "$WORK/logs/task_$name.log" 2>&1 &
+      else
+        nohup /bin/bash "$t" >> "$WORK/logs/task_$name.log" 2>&1 &
+      fi
       echo "$(date '+%F %T') chạy việc một lần: $name" >> "$LOG"
     fi
   done

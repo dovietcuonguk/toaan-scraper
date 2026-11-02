@@ -96,6 +96,8 @@ def main():
     ap.add_argument("--state-dir", required=True)
     ap.add_argument("--workers", type=int, default=max(2, (os.cpu_count() or 4) - 1))
     ap.add_argument("--full-ocr", action="store_true", help="OCR toàn bộ các trang ngay (mặc định: OCR một phần)")
+    ap.add_argument("--pdf-mode", choices=["move", "discard"], default="move",
+                    help="move: chuyển PDF vào pdf-root; discard: không giữ PDF (VPS tự đẩy PDF lên Drive)")
     a = ap.parse_args()
 
     inbox = Path(a.inbox)
@@ -139,15 +141,20 @@ def write_one(a, inbox, rec, text, method, stats, npages=0):
     level = rec.get("cap", "tinh")
     if method.startswith("OCR"):
         stats["ocr"] += 1
-    rel = Path(P.COURT_DIR[court]) / LEVEL_DIR[level] / P.CASE_TYPE_DIR[case_type]
+    rel = Path(P.COURT_DIR[court]) / LEVEL_DIR[level] / P.CASE_TYPE_DIR.get(case_type, "09 KHAC")
     stem = P.build_stem(rec, court, case_type)
+    if stem and rec.get("ma_noi"):  # Tòa cấp huyện/khu vực: mã Nơi riêng, vd "HCM-Quận 1", "HN-KV3"
+        parts = stem.split(" - ", 2)
+        if len(parts) == 3:
+            stem = " - ".join([parts[0], rec["ma_noi"], parts[2]])
     thieu = stem is None
     if thieu:
         stem = f"{rid} - CHUA_XAC_DINH"
         rel = rel / "_CHUA DAT TEN"
     md_dir, pdf_dir = Path(a.md_root) / rel, Path(a.pdf_root) / rel
+    keep_pdf = getattr(a, "pdf_mode", "move") == "move"
     final, n = stem, 2
-    while (md_dir / f"{final}.md").exists() or (pdf_dir / f"{final}.pdf").exists():
+    while (md_dir / f"{final}.md").exists() or (keep_pdf and (pdf_dir / f"{final}.pdf").exists()):
         final = f"{stem} (bản {n})"
         n += 1
 
@@ -181,11 +188,14 @@ def write_one(a, inbox, rec, text, method, stats, npages=0):
     status, note = ("THIEU" if thieu else "OK"), ""
     try:
         md_dir.mkdir(parents=True, exist_ok=True)
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(inbox / rec["pdf_rel"]), str(pdf_dir / f"{final}.pdf"))
+        if keep_pdf:
+            pdf_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(inbox / rec["pdf_rel"]), str(pdf_dir / f"{final}.pdf"))
         tmp = md_dir / f".{final}.md.tmp"
         tmp.write_text(FM.build(fields) + f"\n# {final}\n\n" + body, encoding="utf-8")
         os.replace(tmp, md_dir / f"{final}.md")
+        if not keep_pdf:
+            (inbox / rec["pdf_rel"]).unlink(missing_ok=True)
         if method.startswith("ERROR") or not text:
             note = "khong trich xuat duoc van ban"
         stats["thieu" if thieu else "ok"] += 1

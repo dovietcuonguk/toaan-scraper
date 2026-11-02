@@ -64,6 +64,9 @@ CASE_TYPES = {
     "lao-dong": "Lao động",
     "pha-san": "Quyết định tuyên bố phá sản",
     "xu-ly-hanh-chinh": "Quyết định áp dụng biện pháp xử lý hành chính",
+    # Không lọc loại vụ/việc (để nguyên "-----chọn-----"): dùng cho TAND cấp huyện/khu vực,
+    # loại vụ việc lấy từ trường "loai_vu_viec" của từng bản ghi.
+    "tat-ca": None,
 }
 
 # Bộ lọc "Cấp xét xử" — xác định bằng kiểm tra trực tiếp form tìm kiếm ngày
@@ -80,6 +83,8 @@ LEVELS = {
     # phụ thuộc Ra_Drop_Courts (đã kiểm chứng trên VPS ngày 31/10/2026:
     # 787 = TAND TP. Hồ Chí Minh, 784 = TAND TP. Hà Nội, 775 = TAND TP Đà Nẵng).
     "tinh": ("T", "TAND cấp tỉnh"),
+    # TAND cấp huyện (đến 30/6/2025) và TAND khu vực (từ 01/7/2025) cùng nằm ở cấp "H" trên cổng
+    "huyen": ("H", "TAND cấp huyện"),
 }
 
 # Bộ chọn dự phòng ("main") — dùng khi vì lý do nào đó (đổi giao diện, đổi
@@ -774,8 +779,9 @@ def run(args):
                 select_court(page, args.court_value, log, top=True)
                 dismiss_popups(page)
 
-            log.info(f"Chọn loại vụ/việc: {case_label}")
-            select_case_type(page, case_label, log)
+            if case_label:
+                log.info(f"Chọn loại vụ/việc: {case_label}")
+                select_case_type(page, case_label, log)
             if args.date_from or args.date_to:
                 fill_date_range(page, args.date_from, args.date_to, log)
             click_search(page, log)
@@ -834,9 +840,10 @@ def run(args):
                     page.wait_for_timeout(2000)
                     select_court(page, args.court_value, log, top=False)
                     dismiss_popups(page)
-                log.info(f"  [fallback] Chọn loại vụ/việc: {case_label}")
-                _set_select_value_js(page, FALLBACK_SEL["case_type"], case_label, by_label=True)
-                page.wait_for_timeout(1000)
+                if case_label:
+                    log.info(f"  [fallback] Chọn loại vụ/việc: {case_label}")
+                    _set_select_value_js(page, FALLBACK_SEL["case_type"], case_label, by_label=True)
+                    page.wait_for_timeout(1000)
                 if args.date_from or args.date_to:
                     log.info(
                         f"  [fallback] Điền khoảng ngày ban hành: "

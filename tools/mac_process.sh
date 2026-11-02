@@ -24,11 +24,13 @@ for t in tesseract pdftotext pdftoppm pdfinfo; do command -v $t >/dev/null || { 
 echo "$(date '+%F %T') Bắt đầu. MD → $MD_ROOT | PDF → $PDF_ROOT"
 
 process_inbox() {
-  for d in $(ls -d "$INBOX"/raw-*/ 2>/dev/null | head -1); do
+  for d in $(ls -d "$INBOX"/raw*/ 2>/dev/null | head -1); do
     [ -d "$d" ] || continue
     b=$(basename "$d"); t0=$(date +%s)
+    # raw2-*: đợt 2 (cấp huyện/khu vực) — MacBook chỉ tạo MD, VPS tự đẩy PDF lên Drive
+    case "$b" in raw2-*) mode=discard;; *) mode=move;; esac
     "$PY" "$REPO/mac/process_inbox.py" --inbox "$d" --md-root "$MD_ROOT" --pdf-root "$PDF_ROOT" --state-dir "$STATE" \
-      2>>"$WORKM/process_errors.log" | tail -1
+      --pdf-mode "$mode" 2>>"$WORKM/process_errors.log" | tail -1
     sent=$(cat "$d/.sent" 2>/dev/null || echo 1); lines=$(wc -l < "$d/_done.csv" 2>/dev/null | tr -d ' ')
     if [ -f "$d/_done.csv" ] && tail -n +$((sent + 1)) "$d/_done.csv" | "${SSH[@]}" 'cat >> /root/work/state/processed_mac.csv'; then
       echo "$lines" > "$d/.sent"
@@ -46,37 +48,37 @@ proc_pid=""
 total=0
 while true; do
   if [ -z "$proc_pid" ] || ! kill -0 "$proc_pid" 2>/dev/null; then
-    if ls -d "$INBOX"/raw-*/ >/dev/null 2>&1; then process_inbox & proc_pid=$!; fi
+    if ls -d "$INBOX"/raw*/ >/dev/null 2>&1; then process_inbox & proc_pid=$!; fi
   fi
-  waiting=$(ls -d "$INBOX"/raw-*/ 2>/dev/null | wc -l | tr -d ' ')
+  waiting=$(ls -d "$INBOX"/raw*/ 2>/dev/null | wc -l | tr -d ' ')
   if [ "$waiting" -ge 2 ]; then sleep 30; continue; fi
   free_gb=$(df -g "$HOME" | awk 'NR==2{print $4}')
   if [ "${free_gb:-0}" -lt "$MIN_FREE_GB" ]; then
     echo "$(date '+%F %T') MacBook còn ${free_gb} GB trống — chờ 10 phút cho Google Drive đồng bộ bớt"
     sleep 600; continue
   fi
-  batches=$("${SSH[@]}" 'bash /root/toaan-scraper/vps/outbox.sh >/dev/null 2>&1; /root/toaan-scraper/.venv/bin/python /root/toaan-scraper/vps/outbox_raw.py --make; for d in /root/work/outbox/*/; do [ -d "$d" ] && echo "$(basename "$d") $(find "$d" -type f | wc -l)"; done' 2>/dev/null)
+  batches=$("${SSH[@]}" 'bash /root/toaan-scraper/vps/outbox.sh >/dev/null 2>&1; /root/toaan-scraper/.venv/bin/python /root/toaan-scraper/vps/outbox_raw.py --make; /root/toaan-scraper/.venv/bin/python /root/toaan-scraper/vps/outbox_raw2.py --make; for d in /root/work/outbox/*/; do [ -d "$d" ] && echo "$(basename "$d") $(find "$d" -type f | wc -l)"; done' 2>/dev/null)
   if [ -z "$batches" ]; then
     echo "$(date '+%F %T') Chưa có file mới. Đã nhận tổng cộng: $total file."
-    "${SSH[@]}" 'grep -E "^Hoàn thành" /root/work/TIEN_DO.md 2>/dev/null' || true
-    if "${SSH[@]}" 'test -f /root/work/ALL_DONE' && [ "$waiting" = "0" ] && ! kill -0 "${proc_pid:-0}" 2>/dev/null; then
+    "${SSH[@]}" 'grep -E "Tổng" /root/work/TIEN_DO_DOT2.md 2>/dev/null' || true
+    if "${SSH[@]}" 'test -f /root/work/ALL_DONE && test -f /root/work/DOWNLOAD2_DONE' && [ "$waiting" = "0" ] && ! kill -0 "${proc_pid:-0}" 2>/dev/null; then
       echo "VPS đã xong toàn bộ."; exit 0
     fi
     sleep 300; continue
   fi
   while read -r b n; do
     [ -z "$b" ] && continue
-    case "$b" in raw-*) dest="$INBOX/.tmp-$b"; rm -rf "$dest";; *) dest="$OLD_DEST";; esac
+    case "$b" in raw*) dest="$INBOX/.tmp-$b"; rm -rf "$dest";; *) dest="$OLD_DEST";; esac
     mkdir -p "$dest"
     got=$("${SSH[@]}" "tar -C /root/work/outbox/$b -cf - ." | tar -C "$dest" -xvf - 2>&1 | grep '^x ' | grep -vc '/$')
     if [ "$got" -ge "$n" ]; then
-      case "$b" in raw-*) mv "$dest" "$INBOX/$b";; esac   # chỉ hiện ra cho khâu xử lý khi đã nhận đủ
+      case "$b" in raw*) mv "$dest" "$INBOX/$b";; esac   # chỉ hiện ra cho khâu xử lý khi đã nhận đủ
       "${SSH[@]}" "rm -rf /root/work/outbox/$b"
       total=$((total + n))
       echo "$(date '+%F %T') Lô $b: đã nhận $n file (tổng $total)"
     else
       echo "$(date '+%F %T') Lô $b: chỉ nhận $got/$n file — sẽ kéo lại"
-      case "$b" in raw-*) rm -rf "$dest";; esac
+      case "$b" in raw*) rm -rf "$dest";; esac
       sleep 30
     fi
   done <<< "$batches"

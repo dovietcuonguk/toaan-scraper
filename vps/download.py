@@ -196,6 +196,9 @@ def do_bucket(court, case_type, bucket, dfrom, dto, refresh=False, expected_tota
 
 def main():
     self_update()
+    if (WORK / "DOWNLOAD_DONE").exists():  # cấp tỉnh đã xong; đợt 2 do vps/download_lower.py đảm nhận
+        log("Đã có DOWNLOAD_DONE — không tải lại cấp tỉnh.")
+        return 0
     expected = json.loads((REPO / "vps" / "expected_counts.json").read_text(encoding="utf-8"))
     log("===== Bắt đầu/tiếp tục lượt 1 =====")
     failed = []
