@@ -20,6 +20,7 @@ MODE="${2:-}"
 EXC=(--exclude '.DS_Store' --exclude '._*' --exclude '.*.tmp' --exclude '*.gdoc' --exclude '*.gsheet'
      --exclude '*.gslides' --exclude '*.gform' --exclude '*.gdraw' --exclude '*.gmap' --exclude '*.gsite'
      --exclude 'Icon?' --exclude '.tmp.drivedownload' --exclude '.tmp.driveupload')
+RSYNC=rsync; [ -x /opt/homebrew/bin/rsync ] && RSYNC=/opt/homebrew/bin/rsync
 mkdir -p "$NEW/$REL"
 if [ "$MODE" != "--that" ]; then
   # rsync so khớp cây thư mục nhanh hơn nhiều so với kiểm tra từng file; in danh sách vào ~/toaan-work
@@ -35,7 +36,7 @@ fi
 free_gb=$(df -g "$HOME" | awk 'NR==2{print $4}')
 [ "${free_gb:-0}" -lt 15 ] && { echo "Ổ còn ${free_gb} GB — dừng, chờ Drive tải lên bớt rồi chạy lại."; exit 1; }
 echo "$(date '+%F %T') Bắt đầu đưa \"$REL\" lên (ổ còn ${free_gb} GB)…"
-rsync -a --ignore-existing --remove-source-files "${EXC[@]}" "$BAK/$REL/" "$NEW/$REL/"
+"$RSYNC" -a --ignore-existing --remove-source-files "${EXC[@]}" "$BAK/$REL/" "$NEW/$REL/"
 rc=$?
 left=$(find "$BAK/$REL" -type f ! -name '.DS_Store' 2>/dev/null | wc -l | tr -d ' ')
 echo "$(date '+%F %T') Xong (mã $rc). Còn $left file ở bản cũ (là file đã có sẵn trên mây hoặc file bị loại trừ)."
