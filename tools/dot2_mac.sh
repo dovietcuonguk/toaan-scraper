@@ -170,6 +170,11 @@ PY
 
 cmd_suaten() {
   [ -d "$MD_ROOT" ] || { echo "Không thấy thư mục: $MD_ROOT"; exit 1; }
+  if ! mkdir "$LOGD/suaten.lock" 2>/dev/null; then
+    echo "Đang có một lượt suaten khác chạy (cửa sổ khác). Chờ lượt đó xong rồi chạy lại."
+    echo "(Nếu chắc chắn không còn lượt nào: rmdir \"$LOGD/suaten.lock\")"; exit 1
+  fi
+  trap 'rmdir "$LOGD/suaten.lock" 2>/dev/null' EXIT
   for i in 1 2 3; do
     h=$(host $i); echo "=== VPS$i ==="
     sshq "$h" "/usr/local/bin/toaan-update; systemctl stop toaan-process2 toaan-upload3; \

@@ -61,6 +61,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
+    import fcntl
+    lockf = open(WORK / "state" / "fix_names2.lock", "w")
+    try:
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("Đang có một lượt đổi tên khác chạy trên máy này — bỏ qua lượt này.")
+        sys.exit(3)
     st = X.STATE_CSV
     if not st.exists():
         print("Chưa có processed2.csv")
@@ -123,6 +130,10 @@ def main():
             rc = subprocess.run(["rclone", "moveto", f"banan:{src[0]}/{src[1]}.pdf", f"banan:{dst[0]}/{dst[1]}.pdf",
                                  "--log-level", "ERROR"], capture_output=True, text=True).returncode
             if rc == 0:
+                return "drive"
+            # Nguồn không còn mà đích đã có (đã đổi ở lượt trước/lượt chạy song song) → coi là xong
+            chk = subprocess.run(["rclone", "lsf", f"banan:{dst[0]}/{dst[1]}.pdf"], capture_output=True, text=True)
+            if chk.returncode == 0 and chk.stdout.strip():
                 return "drive"
         return "loi"
 
