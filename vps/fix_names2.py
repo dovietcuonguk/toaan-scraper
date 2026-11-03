@@ -80,7 +80,14 @@ def main():
             keep.append(r)
             used.add((r["dest_dir"], r["final_stem"]))
             continue
-        rel, stem, ct, _ = X.target(*cr)
+        text = None
+        if "-KHAC-" in r["final_stem"]:  # đọc toàn văn từ MD còn trên VPS để suy loại vụ việc
+            for mp in [WORK / "md2" / r["dest_dir"] / f"{r['final_stem']}.md"] + \
+                    list((WORK / "outbox_md").glob(f"*/{r['dest_dir']}/{r['final_stem']}.md")):
+                if mp.exists():
+                    text = mp.read_text(encoding="utf-8").split("\n---\n", 1)[-1]
+                    break
+        rel, stem, ct, _ = X.target(cr[0], cr[1], text, r.get("case_type"))
         final, n = stem, 2
         while (str(rel), final) in used:
             final = f"{stem} (bản {n})"

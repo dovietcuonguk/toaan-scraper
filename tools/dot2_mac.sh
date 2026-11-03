@@ -153,8 +153,13 @@ for r in recent[:20]:
     tag = "{} VPS{} {:<15} Drive{} Mac{} ".format(r["t"][11:19], r["vps"], r["m"] if r["s"] != "LOI" else "LỖI",
                                                  "✓" if r["drive"] else "…", "✓" if r["mac"] else "…")
     name = r["n"]
-    room = max(W - len(tag) - 1, 20)
-    L.append(tag + (name if len(name) <= room else name[:room - 1] + "…"))
+    room = max(W - len(tag) - 1, 30)
+    # Tên dài hơn bề ngang cửa sổ: xuống dòng, thụt vào thẳng cột tên (không cắt)
+    import textwrap
+    parts = textwrap.wrap(name, room, break_long_words=True) or [name]
+    L.append(tag + parts[0])
+    for part in parts[1:]:
+        L.append(" " * len(tag) + part)
 print("\n".join(L))
 PY
 )

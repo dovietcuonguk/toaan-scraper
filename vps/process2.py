@@ -125,7 +125,7 @@ def _so_raw(rec):
 
 def so_ngan(so_raw):
     """Số bản án/quyết định trong tên file: '93/2017/HSST' → '93'; '214' → '214'."""
-    m = re.match(r"(\d+)\s*/", so_raw)
+    m = re.match(r"(\d+[A-Za-z]{0,2})\s*/", so_raw)   # giữ hậu tố chữ: '40a/2021/HNGST' → '40a'
     return m.group(1) if m else re.sub(r"[^0-9A-Za-z]", "", so_raw)
 
 
@@ -167,6 +167,27 @@ def phase2(rec):
     return "PT" if "PT" in letters and "ST" not in letters else "ST"
 
 
+_TXT_KEYS = (("xu ly hanh chinh|cai nghien|giao duc bat buoc|truong giao duong", "xu-ly-hanh-chinh"),
+             ("hinh su|bi cao", "hinh-su"), ("hon nhan|ly hon", "hon-nhan-gia-dinh"),
+             ("kinh doanh thuong mai", "kinh-doanh-thuong-mai"), ("pha san", "pha-san"), ("lao dong", "lao-dong"),
+             ("hanh chinh", "hanh-chinh"), ("dan su", "dan-su"))
+
+
+def loai_tu_van_ban(text):
+    """Loại vụ việc đọc từ phần đầu toàn văn (ký hiệu số 'xx/2021/HS-ST' hoặc tiêu đề 'BẢN ÁN HÌNH SỰ…')."""
+    head = (text or "")[:4000]
+    m = re.search(r"\d+[A-Za-z]?\s*/\s*(?:19|20)\d\d\s*/\s*[A-Za-zĐđ][A-Za-zĐđ\-–&]*", head)
+    if m:
+        ct = loai_tu_so(m.group(0))
+        if ct:
+            return ct
+    t = lower_courts._kd(head[:1500])
+    for pat, key in _TXT_KEYS:
+        if re.search(pat, t):
+            return key
+    return None
+
+
 def case_type2(rec):
     ct = lower_courts.case_type_of(rec)
     if ct == "khac":
@@ -189,10 +210,15 @@ def build_stem2(rec, ma_noi, case_type):
     return f"{y:04d}{mo:02d}{d:02d} - {ma_noi} - {ma} - {tom_tat}"
 
 
-def target(court, rec):
-    """(rel, stem, case_type, thiếu số/ngày) — dùng chung cho process2 và fix_names2."""
+def target(court, rec, text=None, prev_ct=None):
+    """(rel, stem, case_type, thiếu số/ngày) — dùng chung cho process2 và fix_names2.
+    text: toàn văn (nếu có) để suy loại vụ việc; prev_ct: loại đã suy trước đó (giữ khi không suy lại được)."""
     rec = {k: _sp(v) for k, v in rec.items()}
     ct = case_type2(rec)
+    if ct == "khac" and text:
+        ct = loai_tu_van_ban(text) or "khac"
+    if ct == "khac" and prev_ct in P.CASE_TYPE_CODE:
+        ct = prev_ct
     rel = Path(P.COURT_DIR[court["city"]]) / LEVEL_DIR / P.CASE_TYPE_DIR.get(ct, "09 KHAC")
     stem = build_stem2(rec, court["ma_noi"], ct)
     thieu = stem is None
@@ -244,7 +270,7 @@ def write_one(court, rec, res, used):
     text, method, npages, anh = res
     rec = {k: _sp(v) for k, v in rec.items()}
     rid = rec["id"]
-    rel, stem, case_type, thieu = target(court, rec)
+    rel, stem, case_type, thieu = target(court, rec, text)
     final, n = stem, 2
     while (str(rel), final) in used:
         final = f"{stem} (bản {n})"
