@@ -147,8 +147,14 @@ def candidates(done, limit):
     return out
 
 
+def _sp(v):
+    """Gộp khoảng trắng thừa trong trường lấy từ cổng (vd "Hồ Chí Minh,  TP. Hồ Chí Minh")."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFC", v)).strip() if isinstance(v, str) else v
+
+
 def write_one(court, rec, res, used):
     text, method, npages, anh = res
+    rec = {k: _sp(v) for k, v in rec.items()}
     city, rid = court["city"], rec["id"]
     case_type = lower_courts.case_type_of(rec)
     rel = Path(P.COURT_DIR[city]) / LEVEL_DIR / P.CASE_TYPE_DIR.get(case_type, "09 KHAC")
