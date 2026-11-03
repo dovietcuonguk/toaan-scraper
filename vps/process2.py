@@ -141,12 +141,30 @@ def loai_tu_so(so_raw):
 
 
 def loai_tu_qhpl(rec):
-    t = lower_courts._kd(rec.get("quan_he_phap_luat") or "")
-    if "pham toi" in t or re.search(r"\btoi\b", t):
+    """Loại vụ việc suy từ quan hệ pháp luật / thông tin vụ việc (khi cổng không ghi loại)."""
+    t = lower_courts._kd(" ".join(str(rec.get(k) or "") for k in ("quan_he_phap_luat", "thong_tin_vu_viec",
+                                                                  "loai_van_ban")))
+    if re.search(r"xu ly hanh chinh|cai nghien|giao duc bat buoc|truong giao duong", t):
+        return "xu-ly-hanh-chinh"
+    if re.search(r"pham toi|hinh su|bi cao|\btoi\b", t):
         return "hinh-su"
-    if "ly hon" in t or "hon nhan" in t:
+    if re.search(r"ly hon|hon nhan|nuoi con|cap duong", t):
         return "hon-nhan-gia-dinh"
+    if "kinh doanh thuong mai" in t:
+        return "kinh-doanh-thuong-mai"
+    if "pha san" in t:
+        return "pha-san"
     return None
+
+
+def phase2(rec):
+    """Giai đoạn: theo 'cấp xét xử'; không có thì theo ký hiệu số (ST/PT); còn lại ST — TAND cấp huyện và
+    TAND khu vực chỉ giải quyết theo thủ tục sơ thẩm (phúc thẩm thuộc TAND cấp tỉnh)."""
+    ph = P.phase_code_of(rec.get("cap_xet_xu"))
+    if ph != "KHAC":
+        return ph
+    letters = re.sub(r"[^A-Z]", "", lower_courts._kd(_so_raw(rec)).upper())
+    return "PT" if "PT" in letters and "ST" not in letters else "ST"
 
 
 def case_type2(rec):
@@ -166,7 +184,7 @@ def build_stem2(rec, ma_noi, case_type):
     so = so_ngan(_so_raw(rec))
     if not so:
         return None
-    ma = f"{P.phase_code_of(rec.get('cap_xet_xu'))}-{P.CASE_TYPE_CODE.get(case_type, 'KHAC')}-{y}-{so}"
+    ma = f"{phase2(rec)}-{P.CASE_TYPE_CODE.get(case_type, 'KHAC')}-{y}-{so}"
     tom_tat = P.sanitize(rec.get("quan_he_phap_luat") or rec.get("thong_tin_vu_viec") or "")
     return f"{y:04d}{mo:02d}{d:02d} - {ma_noi} - {ma} - {tom_tat}"
 
