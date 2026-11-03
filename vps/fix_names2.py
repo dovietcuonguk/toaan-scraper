@@ -18,6 +18,7 @@ import json
 import re
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -26,6 +27,7 @@ sys.path.insert(0, str(HERE))
 import process2 as X  # noqa: E402
 
 WORK = X.WORK
+TMP_RE = re.compile(r" __doiten\S+$")
 print = functools.partial(print, flush=True)  # noqa: A001  (hiện ngay qua ssh)
 
 
@@ -81,9 +83,10 @@ def main():
             used.add((r["dest_dir"], r["final_stem"]))
             continue
         text = None
-        if "-KHAC-" in r["final_stem"]:  # đọc toàn văn từ MD còn trên VPS để suy loại vụ việc
-            for mp in [WORK / "md2" / r["dest_dir"] / f"{r['final_stem']}.md"] + \
-                    list((WORK / "outbox_md").glob(f"*/{r['dest_dir']}/{r['final_stem']}.md")):
+        ms = TMP_RE.sub("", r["final_stem"])
+        if "-KHAC-" in ms:  # đọc toàn văn từ MD còn trên VPS để suy loại vụ việc
+            for mp in [WORK / "md2" / r["dest_dir"] / f"{ms}.md"] + \
+                    list((WORK / "outbox_md").glob(f"*/{r['dest_dir']}/{ms}.md")):
                 if mp.exists():
                     text = mp.read_text(encoding="utf-8").split("\n---\n", 1)[-1]
                     break
@@ -114,9 +117,14 @@ def main():
             n_.parent.mkdir(parents=True, exist_ok=True)
             o.rename(n_)
             return "vps"
-        rc = subprocess.run(["rclone", "moveto", f"banan:{src[0]}/{src[1]}.pdf", f"banan:{dst[0]}/{dst[1]}.pdf",
-                             "--log-level", "ERROR"]).returncode
-        return "drive" if rc == 0 else "loi"
+        # Drive cần vài giây mới "thấy" file vừa đổi tên (bước 1) → thử lại có giãn cách
+        for wait in (0, 5, 15, 30, 60):
+            time.sleep(wait)
+            rc = subprocess.run(["rclone", "moveto", f"banan:{src[0]}/{src[1]}.pdf", f"banan:{dst[0]}/{dst[1]}.pdf",
+                                 "--log-level", "ERROR"], capture_output=True, text=True).returncode
+            if rc == 0:
+                return "drive"
+        return "loi"
 
     res = ["?"] * len(changes)
 
@@ -151,17 +159,18 @@ def main():
         if how == "loi":  # không đổi được: giữ đúng vị trí hiện tại của PDF
             keep[idx] = dict(r, dest_dir=cur[i][0], final_stem=cur[i][1])
             continue
-        cands = [WORK / "md2" / r["dest_dir"] / f"{r['final_stem']}.md"] + \
-            list((WORK / "outbox_md").glob(f"*/{r['dest_dir']}/{r['final_stem']}.md"))
+        md_stem = TMP_RE.sub("", r["final_stem"])  # lượt trước lỗi ở bước 2: PDF mang tên tạm, MD vẫn tên cũ
+        cands = [WORK / "md2" / r["dest_dir"] / f"{md_stem}.md"] + \
+            list((WORK / "outbox_md").glob(f"*/{r['dest_dir']}/{md_stem}.md"))
         src = next((p for p in cands if p.exists()), None)
         if src:
             md_old.append(src)
             md_new.append((WORK / "md2" / rel / f"{final}.md",
-                           fix_md_text(src.read_text(encoding="utf-8"), r["final_stem"], final, rel, ct)))
+                           fix_md_text(src.read_text(encoding="utf-8"), md_stem, final, rel, ct)))
         else:
             pdf = str(Path(X.PDF_LABEL) / rel / f"{final}.pdf")
-            mac_lines.append("\t".join([f"{r['dest_dir']}/{r['final_stem']}.md", f"{rel}/{final}.md",
-                                        X.CASE_LABEL.get(ct, ct), pdf, r["final_stem"], final]))
+            mac_lines.append("\t".join([f"{r['dest_dir']}/{md_stem}.md", f"{rel}/{final}.md",
+                                        X.CASE_LABEL.get(ct, ct), pdf, md_stem, final]))
     for p in md_old:
         p.unlink()
     for dst, txt in md_new:
