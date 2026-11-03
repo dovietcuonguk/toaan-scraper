@@ -175,27 +175,55 @@ cmd_suaten() {
     sshq "$h" "/usr/local/bin/toaan-update; systemctl stop toaan-process2 toaan-upload3; \
       cd $R && TOAAN_WORK=/root/work .venv/bin/python vps/fix_names2.py" || { echo "VPS$i: LỖI đổi tên"; continue; }
     sshq "$h" 'f=/root/work/state/rename_mac.tsv; [ -s $f ] && cat $f' > "$LOGD/rename_mac_vps$i.tsv"
-    if [ -s "$LOGD/rename_mac_vps$i.tsv" ]; then
-      python3 - "$MD_ROOT" "$LOGD/rename_mac_vps$i.tsv" <<'PY'
+    if [ -s "$LOGD/rename_mac_vps$i.tsv" ] || [ -s "$LOGD/rename_pending_vps$i.tsv" ]; then
+      python3 - "$MD_ROOT" "$LOGD/rename_mac_vps$i.tsv" "$LOGD/rename_pending_vps$i.tsv" <<'PY'
 import json, os, re, sys
-root, tsv = sys.argv[1], sys.argv[2]
-rows = [l.rstrip("\n").split("\t") for l in open(tsv, encoding="utf-8") if l.strip()]
-todo = []
-for old, new, loai, pdf, so, sn in rows:
-    po, pn = os.path.join(root, old), os.path.join(root, new)
-    if os.path.exists(po):
+root, tsv, pend = sys.argv[1], sys.argv[2], sys.argv[3]
+lines = []
+for fn in (pend, tsv):  # dòng còn treo từ lần trước + danh sách mới
+    if os.path.exists(fn):
+        lines += [l.rstrip("\n").split("\t") for l in open(fn, encoding="utf-8") if l.strip()]
+# Gộp chuỗi đổi tên A→B, B→C thành A→C (nhiều lượt suaten nối tiếp nhau)
+final, rev = {}, {}
+for old, new, loai, pdf, so, sn in lines:
+    origin = rev.pop(old, old)
+    head = final[origin][4] if origin in final else so
+    final[origin] = (new, loai, pdf, sn, head)
+    rev[new] = origin
+todo, pending, missing = [], [], 0
+for origin, (new, loai, pdf, sn, head) in final.items():
+    po, pn = os.path.join(root, origin), os.path.join(root, new)
+    if origin == new:
+        continue
+    try:
         t = open(po, encoding="utf-8").read()
-        t = re.sub(r'^pdf: ".*"$', "pdf: " + json.dumps(pdf, ensure_ascii=False), t, count=1, flags=re.M)
-        t = re.sub(r'^loai_vu_viec: ".*"$', "loai_vu_viec: " + json.dumps(loai, ensure_ascii=False), t, count=1, flags=re.M)
-        todo.append((po, pn, t.replace("\n# %s\n" % so, "\n# %s\n" % sn, 1)))
-for po, _, _ in todo:
-    os.remove(po)
-for _, pn, t in todo:
-    os.makedirs(os.path.dirname(pn), exist_ok=True)
-    open(pn, "w", encoding="utf-8").write(t)
-print("Mac: đổi tên %d MD (danh sách %d dòng)" % (len(todo), len(rows)))
+    except FileNotFoundError:
+        if not os.path.exists(pn):
+            missing += 1
+        continue
+    except OSError:
+        pending.append("\t".join([origin, new, loai, pdf, head, sn])); continue
+    t = re.sub(r'^pdf: ".*"$', "pdf: " + json.dumps(pdf, ensure_ascii=False), t, count=1, flags=re.M)
+    t = re.sub(r'^loai_vu_viec: ".*"$', "loai_vu_viec: " + json.dumps(loai, ensure_ascii=False), t, count=1, flags=re.M)
+    todo.append((po, pn, t.replace("\n# %s\n" % head, "\n# %s\n" % sn, 1), "\t".join([origin, new, loai, pdf, head, sn])))
+done = 0
+for po, _, _, line in todo:  # xóa hết bản cũ trước rồi mới ghi bản mới: không ghi đè lẫn nhau
+    try:
+        os.remove(po)
+    except OSError:
+        pass
+for po, pn, t, line in todo:
+    try:
+        os.makedirs(os.path.dirname(pn), exist_ok=True)
+        open(pn, "w", encoding="utf-8").write(t)
+        done += 1
+    except OSError:
+        pending.append(line)
+open(pend, "w", encoding="utf-8").write("".join(x + "\n" for x in pending))
+print("Mac: đổi tên %d MD | chưa có trên Mac %d | để lần sau %d" % (done, missing, len(pending)))
 PY
-      [ $? = 0 ] && sshq "$h" 'mv /root/work/state/rename_mac.tsv /root/work/state/rename_mac.done.$(date +%s)'
+      [ $? = 0 ] && sshq "$h" 'mv /root/work/state/rename_mac.tsv /root/work/state/rename_mac.done.$(date +%s)' \
+        && rm -f "$LOGD/rename_mac_vps$i.tsv"
     fi
     sshq "$h" "systemctl start toaan-process2 toaan-upload3; echo \"VPS$i: đã bật lại đặt tên + đẩy Drive\""
   done
