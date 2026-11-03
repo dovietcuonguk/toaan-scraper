@@ -65,3 +65,55 @@ def case_type_of(rec):
         if pat in t:
             return key
     return "khac"
+
+
+def shard(courts, n):
+    """Chia Tòa cho n máy theo tổng số bản án (LPT, tất định): Tòa lớn trước, mỗi Tòa vào máy đang ít nhất.
+    Trả về list n phần tử, mỗi phần tử là list Tòa (giữ thứ tự của `courts`)."""
+    groups, sums = [[] for _ in range(n)], [0] * n
+    for c in sorted(courts, key=lambda c: (-c["total"], str(c["value"]))):
+        k = min(range(n), key=lambda i: (sums[i], i))
+        groups[k].append(c["value"])
+        sums[k] += c["total"]
+    pos = {v: k for k, g in enumerate(groups) for v in g}
+    out = [[] for _ in range(n)]
+    for c in courts:
+        out[pos[c["value"]]].append(c)
+    return out
+
+
+def parse_shard(s):
+    """'2/3' -> (2, 3)."""
+    k, n = (int(x) for x in s.split("/"))
+    if not 1 <= k <= n:
+        raise ValueError(f"shard không hợp lệ: {s}")
+    return k, n
+
+
+def shard_summary(courts, n):
+    lines = []
+    for k, g in enumerate(shard(courts, n), 1):
+        by = {}
+        for c in g:
+            by[c["city"]] = by.get(c["city"], 0) + c["total"]
+        tot = sum(c["total"] for c in g)
+        lines.append(f"VPS{k}: {fmt(tot)} bản án / {len(g)} Tòa ("
+                     + ", ".join(f"{CITY_CODE[ct]} {fmt(by.get(ct, 0))}" for ct in ("tp-hcm", "ha-noi", "da-nang"))
+                     + ")")
+    return "\n".join(lines)
+
+
+def fmt(n):
+    return f"{n:,}".replace(",", ".")
+
+
+if __name__ == "__main__":  # python3 vps/lower_courts.py /root/work/count_lower.json [số máy]
+    import sys
+    cs = load(sys.argv[1], ["tp-hcm", "ha-noi", "da-nang"])
+    n = int(sys.argv[2]) if len(sys.argv) > 2 else 3
+    print(f"{len(cs)} Tòa, {fmt(sum(c['total'] for c in cs))} bản án")
+    print(shard_summary(cs, n))
+    for k, g in enumerate(shard(cs, n), 1):
+        print(f"\n== VPS{k} ==")
+        for c in g:
+            print(f"  {c['value']:>6}  {c['ma_noi']:<28} {c['kind']:<8} {fmt(c['total']):>7}")

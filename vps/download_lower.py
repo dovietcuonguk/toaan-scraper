@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """Đợt 2: lấy danh sách + tải PDF bản án TAND cấp huyện (cũ) và TAND khu vực, theo từng Tòa.
 
-Chạy trên VPS (--cities tp-hcm) hoặc MacBook (--cities ha-noi,da-nang). Mỗi Tòa có trên 1.500 bản án được
+Phương án A (3 VPS): --shard K/3 chỉ tải nhóm Tòa của máy K (vps/lower_courts.shard, tất định);
+--test chỉ tải một Tòa nhỏ trong nhóm của máy để chạy thử. Mỗi Tòa có trên 1.500 bản án được
 chia theo năm ban hành; không lọc loại vụ việc (loại vụ việc lấy từ bản ghi). Dữ liệu:
   <work>/data2/<city>/<mã Tòa>/<nhóm>/{records.jsonl, records_full.jsonl, pdfs/}
 Xong mỗi nhóm ghi dấu <work>/state/done2/<mã Tòa>__<nhóm>; xong hết ghi <work>/DOWNLOAD2_DONE.
@@ -27,7 +28,9 @@ SPLIT = 1500
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cities", required=True, help="tp-hcm hoặc ha-noi,da-nang")
+    ap.add_argument("--cities", default="tp-hcm,ha-noi,da-nang", help="tp-hcm,ha-noi,da-nang")
+    ap.add_argument("--shard", default=None, help="K/N: chỉ tải nhóm Tòa thứ K trong N máy")
+    ap.add_argument("--test", action="store_true", help="chỉ tải một Tòa nhỏ trong nhóm (chạy thử)")
     ap.add_argument("--work", default=os.environ.get("TOAAN_WORK", "/root/work"))
     ap.add_argument("--courts-json", default=None)
     ap.add_argument("--python", default=str(REPO / ".venv" / "bin" / "python"))
@@ -117,8 +120,17 @@ def main():
     cities = [x.strip() for x in a.cities.split(",") if x.strip()]
     cj = a.courts_json or str(work / "count_lower.json")
     courts = lower_courts.load(cj, cities)
+    if a.shard:
+        k, n = lower_courts.parse_shard(a.shard)
+        courts = lower_courts.shard(courts, n)[k - 1]
+        log(f"Nhóm máy {k}/{n}: {len(courts)} Tòa")
+    if a.test:
+        pick = [c for c in courts if "Cần Giờ" in c["name"]] or \
+            sorted([c for c in courts if c["total"] >= 300] or courts, key=lambda c: c["total"])[:1]
+        courts = pick[:1]
+        log(f"CHẠY THỬ: chỉ tải {courts[0]['ma_noi']} ({courts[0]['total']} bản án)")
     log(f"===== Đợt 2: {len(courts)} Tòa ({', '.join(cities)}), "
-        f"{sum(c['total'] for c in courts):,} bản án theo số đếm =====".replace(",", "."))
+        f"{lower_courts.fmt(sum(c['total'] for c in courts))} bản án theo số đếm =====")
     failed = []
     for _ in range(3):
         failed = []
@@ -135,11 +147,11 @@ def main():
         log(f"Còn {len(failed)} nhóm lỗi, nghỉ 15 phút rồi thử lại: {failed[:10]}")
         time.sleep(900)
     log("===== Lượt cập nhật: năm hiện tại và các Tòa không chia năm =====")
-    for c in courts:
+    for c in ([] if a.test else courts):
         for b, f_, t_ in buckets(c):
             if b in ("tat-ca", str(THIS_YEAR)):
                 do(c, b, f_, t_, refresh=True)
-    (work / "DOWNLOAD2_DONE").write_text(datetime.now().isoformat(timespec="seconds"))
+    (work / ("DOWNLOAD2_TEST_DONE" if a.test else "DOWNLOAD2_DONE")).write_text(datetime.now().isoformat(timespec="seconds"))
     log(f"===== HOÀN TẤT đợt 2 ({', '.join(cities)}). Nhóm còn lỗi: {failed or 'không'} =====")
 
 

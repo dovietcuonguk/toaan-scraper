@@ -18,3 +18,15 @@ Cổng không gửi kèm chứng chỉ trung gian GlobalSign, nên `tools/fix_ce
 - `vps/process_loop.sh` + `vps/process.py`: trích văn bản/OCR tiếng Việt → MD, đẩy PDF + MD lên
   `CONGBOBANAN/TAND CAP TINH/<TÒA>/<NN LOẠI VỤ VIỆC>/{PDF,MD}` trên Google Drive, dịch vụ `toaan-process`.
 - Tiến độ: `CONGBOBANAN/TAND CAP TINH/_TIEN_DO.md` trên Drive, hoặc `bash vps/status.sh` trên VPS.
+
+## Đợt 2 — TAND cấp huyện + TAND khu vực, 3 VPS (phương án A, từ 03/11/2026)
+
+Mỗi VPS tải một nhóm Tòa (`vps/lower_courts.py shard`, chia theo tổng số bản án), đặt tên + tạo MD
+(`vps/process2.py`, chỉ đọc lớp chữ; bản scan gắn `can_ocr: true` để OCR sau trên MacBook), đẩy PDF thẳng lên
+Google Drive `BANAN PDF/<TP>/CAP HUYEN - KHU VUC/<LOẠI>/` (`vps/upload3.sh`, remote rclone `banan` dùng OAuth Client ID riêng).
+MacBook kéo MD về `MDBANAN/` cùng cây thư mục. Điều khiển cả 3 máy từ MacBook bằng `tools/dot2_mac.sh`:
+
+    curl -fsSL https://raw.githubusercontent.com/dovietcuonguk/toaan-scraper/main/tools/dot2_mac.sh -o ~/dot2_mac.sh
+    bash ~/dot2_mac.sh            # xem danh sách lệnh
+
+Tiến độ từng máy: `BANAN PDF/_BAO_CAO/DOT2/TIEN_DO_VPS<k>.md` (30 phút/lần) hoặc `bash ~/dot2_mac.sh tiendo`.
