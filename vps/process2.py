@@ -146,7 +146,7 @@ def loai_tu_qhpl(rec):
                                                                   "loai_van_ban")))
     if re.search(r"xu ly hanh chinh|cai nghien|giao duc bat buoc|truong giao duong", t):
         return "xu-ly-hanh-chinh"
-    if re.search(r"pham toi|hinh su|bi cao|\btoi\b", t):
+    if re.search(r"pham toi|hinh su|bi cao|toi danh", t):
         return "hinh-su"
     if re.search(r"ly hon|hon nhan|nuoi con|cap duong", t):
         return "hon-nhan-gia-dinh"
