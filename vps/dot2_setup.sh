@@ -14,7 +14,9 @@ apt-get install -y -qq git python3-venv poppler-utils rclone curl ca-certificate
 echo "rclone: $(rclone version | head -1)"
 
 step "2/5 Mã nguồn + môi trường Python + Chromium"
-if [ -d "$REPO/.git" ]; then git -C "$REPO" pull -q --ff-only; else git clone -q https://github.com/dovietcuonguk/toaan-scraper "$REPO"; fi
+# Repo trên VPS chỉ chứa mã: đưa về đúng bản trên GitHub kể cả khi có sửa tay hoặc lệch nhánh
+if [ -d "$REPO/.git" ]; then git -C "$REPO" fetch -q origin main && git -C "$REPO" reset -q --hard origin/main
+else git clone -q https://github.com/dovietcuonguk/toaan-scraper "$REPO"; fi
 cd "$REPO" || exit 1
 [ -d .venv ] || python3 -m venv .venv
 .venv/bin/pip install -q -r requirements.txt || { echo "LỖI pip"; exit 1; }
@@ -53,7 +55,7 @@ cat > /usr/local/bin/toaan-update <<'EOS'
 #!/usr/bin/env bash
 cd /root/toaan-scraper || exit 0
 old=$(git rev-parse HEAD)
-git pull -q --ff-only || exit 0
+git fetch -q origin main && git reset -q --hard origin/main || exit 0
 new=$(git rev-parse HEAD)
 [ "$old" = "$new" ] && exit 0
 ch=$(git diff --name-only "$old" "$new")
