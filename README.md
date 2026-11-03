@@ -29,4 +29,4 @@ MacBook kéo MD về `MDBANAN/` cùng cây thư mục. Điều khiển cả 3 m�
     curl -fsSL https://raw.githubusercontent.com/dovietcuonguk/toaan-scraper/main/tools/dot2_mac.sh -o ~/dot2_mac.sh
     bash ~/dot2_mac.sh            # xem danh sách lệnh
 
-Tiến độ từng máy: `BANAN PDF/_BAO_CAO/DOT2/TIEN_DO_VPS<k>.md` (30 phút/lần) hoặc `bash ~/dot2_mac.sh tiendo`.
+Tiến độ từng máy: `BANAN PDF/_TIEN_DO_DOT2/TIEN_DO_VPS<k>.md` (30 phút/lần) hoặc `bash ~/dot2_mac.sh tiendo`.

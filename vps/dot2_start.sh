@@ -12,6 +12,8 @@ TEST=""; [ "$MODE" = "--test" ] && TEST="--test"
 
 [ -s "$WORK/count_lower.json" ] || { echo "THIẾU $WORK/count_lower.json"; exit 1; }
 rclone lsd banan: >/dev/null 2>&1 || { echo "Chưa kết nối Drive (remote banan). Chạy: bash dot2_mac.sh capquyen $K"; exit 1; }
+rclone mkdir "banan:_TIEN_DO_DOT2" 2>/dev/null
+rclone rmdir "banan:_BAO_CAO/DOT2" 2>/dev/null && rclone rmdir "banan:_BAO_CAO" 2>/dev/null
 echo "$K" > "$WORK/dot2_vps"
 mkdir -p "$WORK"/{state,logs,data2,md2,upload2,outbox_md}
 for s in toaan-download toaan-process toaan-upload2; do systemctl disable --now "$s" 2>/dev/null; done

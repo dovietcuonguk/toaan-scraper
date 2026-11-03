@@ -39,6 +39,9 @@ for city in "TP HO CHI MINH" "HA NOI" "DA NANG"; do
     rclone mkdir "banan:$city/CAP HUYEN - KHU VUC/$t/_CHUA DAT TEN" 2>/dev/null
   done
 done
-rclone mkdir "banan:_BAO_CAO/DOT2" 2>/dev/null
+rclone mkdir "banan:_TIEN_DO_DOT2" 2>/dev/null
+# Bản trước tạo "_BAO_CAO/DOT2" trên mây trong khi "_BAO_CAO" của MacBook chưa đồng bộ lên → có thể sinh
+# 2 thư mục trùng tên. Xóa lại nếu RỖNG (rclone rmdir không xóa thư mục có file).
+rclone rmdir "banan:_BAO_CAO/DOT2" 2>/dev/null && rclone rmdir "banan:_BAO_CAO" 2>/dev/null
 date -Iseconds > "$WORK/state/AUTH_OK"
 echo "KẾT NỐI DRIVE: OK"

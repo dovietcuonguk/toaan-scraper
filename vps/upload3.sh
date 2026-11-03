@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Đợt 2, phương án A (dịch vụ toaan-upload3): đẩy PDF đã đặt tên từ /root/work/upload2 lên Google Drive
 # "BANAN PDF" (remote rclone "banan", Client ID riêng), xóa khỏi VPS sau khi lên Drive; 30 phút/lần
-# ghi tiến độ của máy lên BANAN PDF/_BAO_CAO/DOT2/TIEN_DO_VPS<k>.md.
+# ghi tiến độ của máy lên BANAN PDF/_TIEN_DO_DOT2/TIEN_DO_VPS<k>.md.
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${TOAAN_WORK:-/root/work}"
@@ -24,7 +24,7 @@ while true; do
   now=$(date +%s)
   if [ $((now - last)) -ge 1800 ]; then
     "$REPO/.venv/bin/python" "$REPO/vps/dot2_status.py" > "$WORK/TIEN_DO_DOT2_VPS.md" 2>>"$LOG"
-    rclone copyto "$WORK/TIEN_DO_DOT2_VPS.md" "banan:_BAO_CAO/DOT2/TIEN_DO_VPS${K}.md" --log-level ERROR >> "$LOG" 2>&1
+    rclone copyto "$WORK/TIEN_DO_DOT2_VPS.md" "banan:_TIEN_DO_DOT2/TIEN_DO_VPS${K}.md" --log-level ERROR >> "$LOG" 2>&1
     last=$now
   fi
   # Xong toàn bộ: đã tải xong, không còn PDF chờ xử lý / chờ đẩy

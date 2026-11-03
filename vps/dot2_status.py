@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """Tiến độ đợt 2 (phương án A) trên một VPS: bảng Markdown theo từng Tòa trong nhóm của máy.
-  (không tham số)  in bảng đầy đủ (upload3.sh ghi lên BANAN PDF/_BAO_CAO/DOT2/TIEN_DO_VPS<k>.md)
+  (không tham số)  in bảng đầy đủ (upload3.sh ghi lên BANAN PDF/_TIEN_DO_DOT2/TIEN_DO_VPS<k>.md)
   --short          vài dòng tóm tắt (tools/dot2_mac.sh tiendo)
   --pending        số PDF còn chờ xử lý trên máy (0 = xong)
 """
