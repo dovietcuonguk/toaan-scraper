@@ -84,7 +84,7 @@ cmd_theodoi() {
         || echo '{"err": 1}' > "$tmp/$i.json" ) &
     done
     wait
-    cols=$(tput cols 2>/dev/null || echo 160)
+    cols=$(stty size </dev/tty 2>/dev/null | awk '{print $2}'); [ -n "$cols" ] || cols=160
     out=$(python3 - "$tmp" "$every" "$cols" <<'PY'
 import json, os, shutil, sys
 from datetime import datetime
