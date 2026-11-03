@@ -140,13 +140,21 @@ def loai_tu_so(so_raw):
     return None
 
 
+# Tên tội danh thường gặp ở TAND cấp huyện (khi cổng chỉ ghi tội danh, không ghi loại vụ việc)
+_TOI_DANH = ("trom cap|co y gay thuong tich|ma tuy|cuop|lua dao|danh bac|to chuc danh bac|tham o|nhan hoi lo|"
+             "giet nguoi|hiep dam|dam o|cuong doat|chong nguoi thi hanh cong vu|gay roi trat tu|huy hoai tai san|"
+             "lam hu hong tai san|lam gia|vi pham quy dinh ve (dieu khien|tham gia) giao thong|"
+             "vi pham quy dinh ve dieu khien phuong tien|tieu thu tai san|lam dung tin nhiem|buon lau|"
+             "van chuyen trai phep|tang tru trai phep|mua ban trai phep|su dung trai phep|vu khi")
+
+
 def loai_tu_qhpl(rec):
     """Loại vụ việc suy từ quan hệ pháp luật / thông tin vụ việc (khi cổng không ghi loại)."""
     t = lower_courts._kd(" ".join(str(rec.get(k) or "") for k in ("quan_he_phap_luat", "thong_tin_vu_viec",
                                                                   "loai_van_ban")))
     if re.search(r"xu ly hanh chinh|cai nghien|giao duc bat buoc|truong giao duong", t):
         return "xu-ly-hanh-chinh"
-    if re.search(r"pham toi|hinh su|bi cao|toi danh", t):
+    if re.search(r"pham toi|hinh su|bi cao|toi danh|ve toi|bi truy to|" + _TOI_DANH, t):
         return "hinh-su"
     if re.search(r"ly hon|hon nhan|nuoi con|cap duong", t):
         return "hon-nhan-gia-dinh"
@@ -154,6 +162,8 @@ def loai_tu_qhpl(rec):
         return "kinh-doanh-thuong-mai"
     if "pha san" in t:
         return "pha-san"
+    if re.search(r"tranh chap|hop dong|thua ke|boi thuong thiet hai|quyen su dung dat", t):
+        return "dan-su"
     return None
 
 
@@ -357,6 +367,14 @@ def main():
     ap.add_argument("--workers", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--every", type=int, default=60)
     a = ap.parse_args()
+    import fcntl
+    STATE_CSV.parent.mkdir(parents=True, exist_ok=True)
+    lockf = open(STATE_CSV.parent / "process2.lock", "w")
+    try:  # chỉ một tiến trình đặt tên trên mỗi máy (hai tiến trình cùng chuyển một PDF → dòng LỖI)
+        fcntl.flock(lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("Đã có một tiến trình process2 khác đang chạy — thoát.")
+        return
     while True:
         try:
             st = one_pass(a.batch, a.workers)

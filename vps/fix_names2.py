@@ -68,6 +68,12 @@ def main():
     except OSError:
         print("Đang có một lượt đổi tên khác chạy trên máy này — bỏ qua lượt này.")
         sys.exit(3)
+    plock = open(WORK / "state" / "process2.lock", "w")
+    try:  # khâu đặt tên phải đang dừng (dot2_mac.sh suaten dừng toaan-process2 trước)
+        fcntl.flock(plock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("Khâu đặt tên (process2) vẫn đang chạy — dừng toaan-process2 trước rồi chạy lại.")
+        sys.exit(4)
     st = X.STATE_CSV
     if not st.exists():
         print("Chưa có processed2.csv")
@@ -75,6 +81,9 @@ def main():
     with st.open(encoding="utf-8-sig") as f:
         rows = list(csv.DictReader(f))
     recs = load_records()
+    ok_ids = {r["id"] for r in rows if r["status"] != "LOI"}
+    twins = sum(1 for r in rows if r["status"] == "LOI" and r["id"] in ok_ids)
+    rows = [r for r in rows if not (r["status"] == "LOI" and r["id"] in ok_ids)]  # LỖI trùng một dòng đã xử lý xong
     used, changes, keep, retry = set(), [], [], 0
     for r in rows:
         if r["status"] == "LOI":
@@ -107,10 +116,11 @@ def main():
             changes.append((r, str(rel), final, ct, len(keep)))
             r = dict(r, dest_dir=str(rel), final_stem=final, case_type=ct)
         keep.append(r)
-    print(f"Tổng {len(rows)} dòng | cần đổi tên {len(changes)} | dòng lỗi xử lý lại {retry}")
+    print(f"Tổng {len(rows)} dòng | cần đổi tên {len(changes)} | dòng lỗi xử lý lại {retry} | "
+          f"bỏ dòng lỗi trùng {twins}")
     for r, rel, final, _, _ in changes[:8]:
         print(f"  {r['final_stem']}\n   → {final}  [{rel}]")
-    if a.dry_run or (not changes and not retry):
+    if a.dry_run or (not changes and not retry and not twins):
         return
 
     # Tên mới của file này có thể đang là tên cũ của file khác → đổi 2 bước qua tên tạm để không ghi đè
