@@ -10,6 +10,7 @@
 #   bash ~/dot2_mac.sh tiendo         xem tiến độ 3 máy
 #   bash ~/dot2_mac.sh theodoi [giây]  màn hình theo dõi thời gian thực cả 3 máy (mặc định 30 giây/lần)
 #   caffeinate -is bash ~/dot2_mac.sh keo    kéo MD về MDBANAN (để Terminal mở, MacBook cắm sạc)
+#   bash ~/dot2_mac.sh suaten         đổi lại tên file đã xử lý theo quy tắc mới (Drive + VPS + Mac)
 #   bash ~/dot2_mac.sh dung           dừng tải trên cả 3 máy (khẩn cấp)
 set -u
 HOSTS=("${VPS1:-14.225.215.198}" "${VPS2:-103.153.75.234}" "${VPS3:-103.153.75.147}")
@@ -83,11 +84,12 @@ cmd_theodoi() {
         || echo '{"err": 1}' > "$tmp/$i.json" ) &
     done
     wait
-    out=$(python3 - "$tmp" "$every" <<'PY'
+    cols=$(tput cols 2>/dev/null || echo 160)
+    out=$(python3 - "$tmp" "$every" "$cols" <<'PY'
 import json, os, shutil, sys
 from datetime import datetime
 d, every = sys.argv[1], sys.argv[2]
-W = shutil.get_terminal_size((120, 40)).columns
+W = int(sys.argv[3]) if len(sys.argv) > 3 and sys.argv[3].isdigit() else 160
 def f(n): return "{:,}".format(int(n)).replace(",", ".")
 rows, recent, T = [], [], {}
 keys = ["total", "listed", "got", "ok", "drive", "mac", "up_wait", "md_wait", "last_hour"]
@@ -145,6 +147,39 @@ PY
   done
 }
 
+cmd_suaten() {
+  [ -d "$MD_ROOT" ] || { echo "Không thấy thư mục: $MD_ROOT"; exit 1; }
+  for i in 1 2 3; do
+    h=$(host $i); echo "=== VPS$i ==="
+    sshq "$h" "/usr/local/bin/toaan-update; systemctl stop toaan-process2 toaan-upload3; \
+      cd $R && TOAAN_WORK=/root/work .venv/bin/python vps/fix_names2.py" || { echo "VPS$i: LỖI đổi tên"; continue; }
+    sshq "$h" 'f=/root/work/state/rename_mac.tsv; [ -s $f ] && cat $f' > "$LOGD/rename_mac_vps$i.tsv"
+    if [ -s "$LOGD/rename_mac_vps$i.tsv" ]; then
+      python3 - "$MD_ROOT" "$LOGD/rename_mac_vps$i.tsv" <<'PY'
+import json, os, re, sys
+root, tsv = sys.argv[1], sys.argv[2]
+rows = [l.rstrip("\n").split("\t") for l in open(tsv, encoding="utf-8") if l.strip()]
+todo = []
+for old, new, loai, pdf, so, sn in rows:
+    po, pn = os.path.join(root, old), os.path.join(root, new)
+    if os.path.exists(po):
+        t = open(po, encoding="utf-8").read()
+        t = re.sub(r'^pdf: ".*"$', "pdf: " + json.dumps(pdf, ensure_ascii=False), t, count=1, flags=re.M)
+        t = re.sub(r'^loai_vu_viec: ".*"$', "loai_vu_viec: " + json.dumps(loai, ensure_ascii=False), t, count=1, flags=re.M)
+        todo.append((po, pn, t.replace("\n# %s\n" % so, "\n# %s\n" % sn, 1)))
+for po, _, _ in todo:
+    os.remove(po)
+for _, pn, t in todo:
+    os.makedirs(os.path.dirname(pn), exist_ok=True)
+    open(pn, "w", encoding="utf-8").write(t)
+print("Mac: đổi tên %d MD (danh sách %d dòng)" % (len(todo), len(rows)))
+PY
+      [ $? = 0 ] && sshq "$h" 'mv /root/work/state/rename_mac.tsv /root/work/state/rename_mac.done.$(date +%s)'
+    fi
+    sshq "$h" "systemctl start toaan-process2 toaan-upload3; echo \"VPS$i: đã bật lại đặt tên + đẩy Drive\""
+  done
+}
+
 cmd_dung() {
   for i in 1 2 3; do sshq "$(host $i)" 'systemctl stop toaan-lower; echo "VPS'"$i"': đã dừng tải (toaan-lower)"'; done
 }
@@ -189,6 +224,7 @@ case "${1:-}" in
   tiendo) cmd_tiendo;;
   theodoi) cmd_theodoi "${2:-30}";;
   keo) cmd_keo;;
+  suaten) cmd_suaten;;
   dung) cmd_dung;;
-  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//';;
+  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//';;
 esac

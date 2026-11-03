@@ -50,7 +50,7 @@ def main():
         with lg.open(encoding="utf-8", errors="replace") as f:
             tail = deque(f, maxlen=30)
         for line in reversed(tail):
-            m = re.search(r"\[([^\]]+)\]", line)
+            m = re.match(r"\d{4}-\d\d-\d\d \d\d:\d\d:\d\d \[([^\]]+)\]", line)
             if m:
                 cur = m.group(1)
                 break

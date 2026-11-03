@@ -114,6 +114,76 @@ def extract(pdf_path):
     return "\n\n".join(parts), "NATIVE_MOT_PHAN", npages, anh
 
 
+_CT_FROM_SO = (("XLHC", "xu-ly-hanh-chinh"), ("KDTM", "kinh-doanh-thuong-mai"), ("HNG", "hon-nhan-gia-dinh"),
+               ("HS", "hinh-su"), ("LD", "lao-dong"), ("HC", "hanh-chinh"), ("PS", "pha-san"), ("DS", "dan-su"))
+
+
+def _so_raw(rec):
+    m = P.SO_NGAY_RE.search(rec.get("so_ngay_toa") or "")
+    return m.group(1).strip().lstrip(":").strip() if m else ""
+
+
+def so_ngan(so_raw):
+    """Số bản án/quyết định trong tên file: '93/2017/HSST' → '93'; '214' → '214'."""
+    m = re.match(r"(\d+)\s*/", so_raw)
+    return m.group(1) if m else re.sub(r"[^0-9A-Za-z]", "", so_raw)
+
+
+def loai_tu_so(so_raw):
+    """Loại vụ việc suy từ ký hiệu trong số (vd '38/2017/HNGĐ-ST' → hôn nhân gia đình)."""
+    t = lower_courts._kd(so_raw).upper()
+    t = t.split("/", 1)[1] if "/" in t else ""
+    letters = re.sub(r"[^A-Z]", "", t).replace("QD", "")
+    for pat, key in _CT_FROM_SO:
+        if pat in letters:
+            return key
+    return None
+
+
+def loai_tu_qhpl(rec):
+    t = lower_courts._kd(rec.get("quan_he_phap_luat") or "")
+    if "pham toi" in t or re.search(r"\btoi\b", t):
+        return "hinh-su"
+    if "ly hon" in t or "hon nhan" in t:
+        return "hon-nhan-gia-dinh"
+    return None
+
+
+def case_type2(rec):
+    ct = lower_courts.case_type_of(rec)
+    if ct == "khac":
+        ct = loai_tu_so(_so_raw(rec)) or loai_tu_qhpl(rec) or "khac"
+    return ct
+
+
+def build_stem2(rec, ma_noi, case_type):
+    m = P.SO_NGAY_RE.search(rec.get("so_ngay_toa") or "")
+    if not m:
+        return None
+    d, mo, y = int(m.group(2)), int(m.group(3)), int(m.group(4))
+    if not (1 <= d <= 31 and 1 <= mo <= 12 and 1900 <= y <= 2100):
+        return None
+    so = so_ngan(_so_raw(rec))
+    if not so:
+        return None
+    ma = f"{P.phase_code_of(rec.get('cap_xet_xu'))}-{P.CASE_TYPE_CODE.get(case_type, 'KHAC')}-{y}-{so}"
+    tom_tat = P.sanitize(rec.get("quan_he_phap_luat") or rec.get("thong_tin_vu_viec") or "")
+    return f"{y:04d}{mo:02d}{d:02d} - {ma_noi} - {ma} - {tom_tat}"
+
+
+def target(court, rec):
+    """(rel, stem, case_type, thiếu số/ngày) — dùng chung cho process2 và fix_names2."""
+    rec = {k: _sp(v) for k, v in rec.items()}
+    ct = case_type2(rec)
+    rel = Path(P.COURT_DIR[court["city"]]) / LEVEL_DIR / P.CASE_TYPE_DIR.get(ct, "09 KHAC")
+    stem = build_stem2(rec, court["ma_noi"], ct)
+    thieu = stem is None
+    if thieu:
+        stem = f"{rec['id']} - CHUA_XAC_DINH"
+        rel = rel / "_CHUA DAT TEN"
+    return rel, fit_bytes(stem), ct, thieu
+
+
 def load_state():
     done, used = set(), set()
     if STATE_CSV.exists():
@@ -155,19 +225,8 @@ def _sp(v):
 def write_one(court, rec, res, used):
     text, method, npages, anh = res
     rec = {k: _sp(v) for k, v in rec.items()}
-    city, rid = court["city"], rec["id"]
-    case_type = lower_courts.case_type_of(rec)
-    rel = Path(P.COURT_DIR[city]) / LEVEL_DIR / P.CASE_TYPE_DIR.get(case_type, "09 KHAC")
-    stem = P.build_stem(rec, city, case_type)
-    if stem:
-        parts = stem.split(" - ", 2)
-        if len(parts) == 3:
-            stem = " - ".join([parts[0], court["ma_noi"], parts[2]])
-    thieu = stem is None
-    if thieu:
-        stem = f"{rid} - CHUA_XAC_DINH"
-        rel = rel / "_CHUA DAT TEN"
-    stem = fit_bytes(stem)
+    rid = rec["id"]
+    rel, stem, case_type, thieu = target(court, rec)
     final, n = stem, 2
     while (str(rel), final) in used:
         final = f"{stem} (bản {n})"
