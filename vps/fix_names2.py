@@ -12,6 +12,7 @@ Phải dừng toaan-process2 và toaan-upload3 trong lúc chạy (dot2_mac.sh su
   --dry-run  chỉ in thống kê
 """
 import argparse
+import functools
 import csv
 import json
 import re
@@ -25,6 +26,7 @@ sys.path.insert(0, str(HERE))
 import process2 as X  # noqa: E402
 
 WORK = X.WORK
+print = functools.partial(print, flush=True)  # noqa: A001  (hiện ngay qua ssh)
 
 
 def load_records():
@@ -120,11 +122,16 @@ def main():
         else:
             res[i] = "loi"
 
+    done_n = [0]
+
     def phase2(i):
         if res[i] == "loi":
             return
         c = changes[i]
         res[i] = mv(cur[i], (c[1], c[2]))
+        done_n[0] += 1
+        if done_n[0] % 50 == 0:
+            print(f"  … đã đổi {done_n[0]}/{len(changes)} PDF")
 
     conflict = [i for i, c in enumerate(changes) if (c[1], c[2]) in olds]
     with ThreadPoolExecutor(4) as ex:
