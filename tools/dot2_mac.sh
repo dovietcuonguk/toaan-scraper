@@ -123,11 +123,27 @@ if T:
         "TỔNG", f(T["total"]), f(T["listed"]), f(T["got"]), f(T["ok"]), f(T["drive"]), f(T["mac"]),
         f(T["up_wait"]), f(T["md_wait"]), f(T["last_hour"])))
     pct = T["ok"] * 100.0 / max(T["total"], 1)
-    rate = T["last_hour"]
-    eta = "~%.0f giờ" % ((T["total"] - T["ok"]) / rate) if rate else "chưa tính được"
+    # Tốc độ đo trên MacBook: so sánh số liệu với lần đo cách đây tối đa 30 phút (lưu trong thư mục tạm)
+    import time as _t
+    hp = os.path.join(d, "hist.json")
+    try:
+        hist = json.load(open(hp))
+    except Exception:
+        hist = []
+    now = _t.time()
+    hist = [h for h in hist if now - h[0] <= 1800] + [[now, T["got"], T["drive"], T["ok"]]]
+    json.dump(hist, open(hp, "w"))
+    h0 = hist[0]
+    span = (now - h0[0]) / 3600.0
     L.append("")
-    L.append("Tiến độ: {:.1f}% · tốc độ 3 máy (60 phút qua): {} bản/giờ · còn lại {} bản, {}".format(
-        pct, f(rate), f(max(T["total"] - T["ok"], 0)), eta))
+    if span >= 0.05:
+        r_got, r_drv = (T["got"] - h0[1]) / span, (T["drive"] - h0[2]) / span
+        left = max(T["total"] - T["got"], 0)
+        eta = "~%.0f giờ" % (left / r_got) if r_got > 0 else "chưa tính được"
+        L.append("Tiến độ: {:.1f}% · đo {:.0f} phút gần nhất: tải về VPS {} PDF/giờ, lên Drive {} PDF/giờ · còn {} bản, {}".format(
+            pct, span * 60, f(r_got), f(r_drv), f(left), eta))
+    else:
+        L.append("Tiến độ: {:.1f}% · đang đo tốc độ (cần vài phút sau khi mở màn hình)".format(pct))
     L.append("Lớp chữ: " + " · ".join("{} {}".format(m, f(n)) for m, n in sorted(meth.items())))
     L.append("Dịch vụ ●●● = tải · đặt tên+MD · đẩy Drive (○ = đang tắt).  'MD về Mac' chỉ tăng khi lệnh keo đang chạy.")
 L.append("")
