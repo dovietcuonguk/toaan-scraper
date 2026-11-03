@@ -8,6 +8,7 @@
 #   bash ~/dot2_mac.sh thu            chạy thử trên VPS1 (một Tòa nhỏ, ưu tiên TAND huyện Cần Giờ)
 #   bash ~/dot2_mac.sh chay           chạy chính thức cả 3 máy
 #   bash ~/dot2_mac.sh tiendo         xem tiến độ 3 máy
+#   bash ~/dot2_mac.sh theodoi [giây]  màn hình theo dõi thời gian thực cả 3 máy (mặc định 30 giây/lần)
 #   caffeinate -is bash ~/dot2_mac.sh keo    kéo MD về MDBANAN (để Terminal mở, MacBook cắm sạc)
 #   bash ~/dot2_mac.sh dung           dừng tải trên cả 3 máy (khẩn cấp)
 set -u
@@ -70,6 +71,80 @@ cmd_tiendo() {
   done
 }
 
+cmd_theodoi() {
+  every="${1:-30}"; tmp=$(mktemp -d)
+  CM=(-o ControlMaster=auto -o ControlPath="$HOME/.ssh/cm-dot2-%h" -o ControlPersist=10m)
+  trap 'rm -rf "$tmp"; tput cnorm 2>/dev/null; echo; exit 0' INT TERM
+  tput civis 2>/dev/null
+  while true; do
+    for i in 1 2 3; do
+      ( ssh -o BatchMode=yes -o ConnectTimeout=15 "${CM[@]}" "root@$(host $i)" \
+          "cd $R && TOAAN_WORK=/root/work .venv/bin/python vps/dot2_watch.py" > "$tmp/$i.json" 2>/dev/null \
+        || echo '{"err": 1}' > "$tmp/$i.json" ) &
+    done
+    wait
+    out=$(python3 - "$tmp" "$every" <<'PY'
+import json, os, shutil, sys
+from datetime import datetime
+d, every = sys.argv[1], sys.argv[2]
+W = shutil.get_terminal_size((120, 40)).columns
+def f(n): return "{:,}".format(int(n)).replace(",", ".")
+rows, recent, T = [], [], {}
+keys = ["total", "listed", "got", "ok", "drive", "mac", "up_wait", "md_wait", "last_hour"]
+meth = {}
+L = []
+L.append("THEO DÕI ĐỢT 2 — 3 VPS — {}   (làm mới {} giây/lần · Ctrl+C để thoát)".format(datetime.now().strftime("%d/%m/%Y %H:%M:%S"), every))
+L.append("")
+hdr = "{:<6}{:>11}{:>10}{:>12}{:>12}{:>15}{:>11}{:>11}{:>9}{:>9}{:>9}  {}".format(
+    "Máy", "Trên cổng", "Lấy DS", "PDF về VPS", "Đặt tên+MD", "PDF lên Drive", "MD về Mac", "Chờ Drive", "Chờ Mac", "Bản/giờ", "Ổ trống", "Đang tải")
+L.append(hdr); L.append("-" * min(W, len(hdr) + 18))
+for i in (1, 2, 3):
+    try:
+        j = json.load(open(os.path.join(d, "%d.json" % i)))
+    except Exception:
+        j = {"err": 1}
+    if j.get("err"):
+        L.append("VPS%d  — không kết nối được" % i); continue
+    j["drive"] = max(j["ok"] - j["up_wait"], 0)
+    j["mac"] = max(j["ok"] - j["md_wait"], 0)
+    for k in keys: T[k] = T.get(k, 0) + j[k]
+    for m, n in j["methods"].items(): meth[m] = meth.get(m, 0) + n
+    st = "XONG" if j["done"] else (j["cur"] or "-")
+    sv = "".join("●" if v == "active" else "○" for v in j["svc"].values())
+    L.append("{:<6}{:>11}{:>10}{:>12}{:>12}{:>15}{:>11}{:>11}{:>9}{:>9}{:>8}G  {} {}".format(
+        "VPS%d" % i, f(j["total"]), f(j["listed"]), f(j["got"]), f(j["ok"]), f(j["drive"]), f(j["mac"]),
+        f(j["up_wait"]), f(j["md_wait"]), f(j["last_hour"]), j["free_gb"], sv, st))
+    for r in j["recent"]: r["vps"] = i; recent.append(r)
+if T:
+    L.append("-" * min(W, len(hdr) + 18))
+    L.append("{:<6}{:>11}{:>10}{:>12}{:>12}{:>15}{:>11}{:>11}{:>9}{:>9}".format(
+        "TỔNG", f(T["total"]), f(T["listed"]), f(T["got"]), f(T["ok"]), f(T["drive"]), f(T["mac"]),
+        f(T["up_wait"]), f(T["md_wait"]), f(T["last_hour"])))
+    pct = T["ok"] * 100.0 / max(T["total"], 1)
+    rate = T["last_hour"]
+    eta = "~%.0f giờ" % ((T["total"] - T["ok"]) / rate) if rate else "chưa tính được"
+    L.append("")
+    L.append("Tiến độ: {:.1f}% · tốc độ 3 máy (60 phút qua): {} bản/giờ · còn lại {} bản, {}".format(
+        pct, f(rate), f(max(T["total"] - T["ok"], 0)), eta))
+    L.append("Lớp chữ: " + " · ".join("{} {}".format(m, f(n)) for m, n in sorted(meth.items())))
+    L.append("Dịch vụ ●●● = tải · đặt tên+MD · đẩy Drive (○ = đang tắt).  'MD về Mac' chỉ tăng khi lệnh keo đang chạy.")
+L.append("")
+L.append("20 FILE GẦN NHẤT (Drive/Mac: ✓ đã tới, … đang chờ)")
+recent.sort(key=lambda r: r["t"], reverse=True)
+for r in recent[:20]:
+    tag = "{} VPS{} {:<15} Drive{} Mac{} ".format(r["t"][11:19], r["vps"], r["m"] if r["s"] != "LOI" else "LỖI",
+                                                 "✓" if r["drive"] else "…", "✓" if r["mac"] else "…")
+    name = r["n"]
+    room = max(W - len(tag) - 1, 20)
+    L.append(tag + (name if len(name) <= room else name[:room - 1] + "…"))
+print("\n".join(L))
+PY
+)
+    clear; printf '%s\n' "$out"
+    sleep "$every"
+  done
+}
+
 cmd_dung() {
   for i in 1 2 3; do sshq "$(host $i)" 'systemctl stop toaan-lower; echo "VPS'"$i"': đã dừng tải (toaan-lower)"'; done
 }
@@ -112,7 +187,8 @@ case "${1:-}" in
   thu) cmd_thu;;
   chay) cmd_chay;;
   tiendo) cmd_tiendo;;
+  theodoi) cmd_theodoi "${2:-30}";;
   keo) cmd_keo;;
   dung) cmd_dung;;
-  *) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//';;
+  *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//';;
 esac
