@@ -68,12 +68,25 @@ def main():
         s.discard(None)
         return s
 
+    QUARTERS = ((1, "01/01", "31/03"), (2, "01/04", "30/06"), (3, "01/07", "30/09"), (4, "01/10", "31/12"))
+
     def buckets(c):
+        """Tòa > 1.500 bản: chia theo quý (danh sách trên cổng chậm dần ở các trang sâu; nhóm nhỏ ~25 trang
+        nhanh hơn nhiều và tải PDF xen kẽ sớm hơn). Năm nào đã bắt đầu tải theo cả năm thì giữ nguyên."""
         if c["total"] <= SPLIT:
             return [("tat-ca", None, None)]
-        start = 2025 if c["kind"] == "khu-vuc" else 2017
-        b = [] if c["kind"] == "khu-vuc" else [("truoc-2017", "01/01/1990", "31/12/2016")]
-        return b + [(str(y), f"01/01/{y}", f"31/12/{y}") for y in range(start, THIS_YEAR + 1)]
+        kv = c["kind"] == "khu-vuc"
+        b = [] if kv else [("truoc-2017", "01/01/1990", "31/12/2016")]
+        for y in range(2025 if kv else 2017, THIS_YEAR + 1):
+            ydir = data / c["city"] / c["value"] / str(y)
+            if (mark / f"{c['value']}__{y}").exists() or (ydir / "records.jsonl").exists():
+                b.append((str(y), f"01/01/{y}", f"31/12/{y}"))
+                continue
+            for q, d1, d2 in QUARTERS:
+                if kv and y == 2025 and q < 3:  # TAND khu vực hoạt động từ 01/7/2025
+                    continue
+                b.append((f"{y}-Q{q}", f"{d1}/{y}", f"{d2}/{y}"))
+        return b
 
     def do(c, bucket, dfrom, dto, refresh=False):
         out = data / c["city"] / c["value"] / bucket
@@ -149,7 +162,7 @@ def main():
     log("===== Lượt cập nhật: năm hiện tại và các Tòa không chia năm =====")
     for c in ([] if a.test else courts):
         for b, f_, t_ in buckets(c):
-            if b in ("tat-ca", str(THIS_YEAR)):
+            if b in ("tat-ca", str(THIS_YEAR)) or b.startswith(f"{THIS_YEAR}-Q"):
                 do(c, b, f_, t_, refresh=True)
     (work / ("DOWNLOAD2_TEST_DONE" if a.test else "DOWNLOAD2_DONE")).write_text(datetime.now().isoformat(timespec="seconds"))
     log(f"===== HOÀN TẤT đợt 2 ({', '.join(cities)}). Nhóm còn lỗi: {failed or 'không'} =====")
