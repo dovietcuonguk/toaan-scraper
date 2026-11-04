@@ -238,14 +238,40 @@ def target(court, rec, text=None, prev_ct=None):
     return rel, fit_bytes(stem), ct, thieu
 
 
+RETRIED = set()  # mã đã cho làm lại trong lần chạy này (mỗi mã LỖI chỉ làm lại một lần/lần khởi động)
+
+
 def load_state():
-    done, used = set(), set()
+    """done: mã đã xử lý (dòng LỖI chưa làm lại thì không tính → được xử lý lại); used: tên đã dùng."""
+    done, used, loi = set(), set(), set()
     if STATE_CSV.exists():
         with STATE_CSV.open(encoding="utf-8-sig") as f:
             for r in csv.DictReader(f):
+                if r["status"] == "LOI":
+                    loi.add(r["id"])
+                    continue
                 done.add(r["id"])
                 used.add((r["dest_dir"], r["final_stem"]))
-    return done, used
+    loi -= done
+    done |= RETRIED & loi  # đã làm lại một lần mà vẫn lỗi: để fix_names2/suaten xử lý
+    return done, used, loi - RETRIED
+
+
+def drop_loi_rows(ids):
+    """Bỏ các dòng LỖI cũ của những mã vừa xử lý lại xong."""
+    if not ids:
+        return
+    with STATE_CSV.open(encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    keep = [r for r in rows if not (r["status"] == "LOI" and r["id"] in ids)]
+    if len(keep) == len(rows):
+        return
+    tmp = STATE_CSV.with_suffix(".csv.tmp")
+    with tmp.open("w", newline="", encoding="utf-8-sig") as f:
+        w = csv.DictWriter(f, fieldnames=FIELDNAMES)
+        w.writeheader()
+        w.writerows(keep)
+    tmp.replace(STATE_CSV)
 
 
 def candidates(done, limit):
@@ -347,11 +373,12 @@ def write_one(court, rec, res, used):
 
 
 def one_pass(batch, workers):
-    done, used = load_state()
+    done, used, loi = load_state()
     todo = candidates(done, batch)
+    RETRIED.update(r["id"] for _, r in todo if r["id"] in loi)
     if not todo:
         return {}
-    stats = {}
+    stats, fixed = {}, set()
     STATE_CSV.parent.mkdir(parents=True, exist_ok=True)
     header = not STATE_CSV.exists()
     with ProcessPoolExecutor(max_workers=workers) as ex, STATE_CSV.open("a", newline="", encoding="utf-8-sig") as f:
@@ -365,6 +392,11 @@ def one_pass(batch, workers):
             f.flush()
             key = row["status"] if row["status"] != "OK" else row["method"]
             stats[key] = stats.get(key, 0) + 1
+            if row["status"] != "LOI" and rec["id"] in loi:
+                fixed.add(rec["id"])
+    drop_loi_rows(fixed)
+    if fixed:
+        stats["LOI_LAM_LAI_OK"] = len(fixed)
     return stats
 
 

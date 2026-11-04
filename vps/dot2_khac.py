@@ -24,6 +24,10 @@ twin = sum(1 for r in kinds["LOI"] if r["id"] in ok_ids)
 pdf_left = sum(1 for r in kinds["LOI"] if (recs.get(r["id"], (None, {}))[1].get("pdf_path") or "") and
                Path(recs[r["id"]][1]["pdf_path"]).exists())
 print(f"LỖI: {twin} dòng trùng một bản đã xử lý xong (vô hại) | {pdf_left} còn PDF trên VPS (sẽ làm lại)")
+from collections import Counter
+byhour = Counter(r["timestamp"][:13] for r in kinds["LOI"])
+print("LỖI theo giờ (6 giờ gần nhất): " + ", ".join(f"{h[5:]}h={n}" for h, n in sorted(byhour.items())[-6:]))
+print("Lỗi gần nhất: " + (kinds["LOI"][-1]["note"][-160:] if kinds["LOI"] else "-"))
 print(f"Tổng {len(rows)} | LỖI {len(kinds['LOI'])} | loại KHAC {len(kinds['KHAC'])} | giai đoạn KHAC {len(kinds['GD_KHAC'])}")
 keys = ("so_ngay_toa", "cap_xet_xu", "loai_vu_viec", "loai_van_ban", "quan_he_phap_luat", "thong_tin_vu_viec")
 for name, lst in kinds.items():
