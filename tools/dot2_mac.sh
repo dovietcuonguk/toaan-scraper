@@ -74,16 +74,22 @@ cmd_tiendo() {
 
 cmd_theodoi() {
   every="${1:-30}"; tmp=$(mktemp -d)
-  CM=(-o ControlMaster=auto -o ControlPath="$HOME/.ssh/cm-dot2-%h" -o ControlPersist=10m)
+  # Không dùng kết nối ssh dùng chung (ControlMaster): sau khi Mac ngủ/đổi mạng nó treo cả màn hình
+  CM=(-o ServerAliveInterval=10 -o ServerAliveCountMax=2)
+  rm -f "$HOME"/.ssh/cm-dot2-* 2>/dev/null
   trap 'rm -rf "$tmp"; tput cnorm 2>/dev/null; echo; exit 0' INT TERM
   tput civis 2>/dev/null
   while true; do
+    pids=()
     for i in 1 2 3; do
+      rm -f "$tmp/$i.json"
       ( ssh -o BatchMode=yes -o ConnectTimeout=15 "${CM[@]}" "root@$(host $i)" \
-          "cd $R && TOAAN_WORK=/root/work .venv/bin/python vps/dot2_watch.py" > "$tmp/$i.json" 2>/dev/null \
-        || echo '{"err": 1}' > "$tmp/$i.json" ) &
+          "cd $R && TOAAN_WORK=/root/work .venv/bin/python vps/dot2_watch.py" > "$tmp/$i.part" 2>/dev/null \
+          && mv "$tmp/$i.part" "$tmp/$i.json" || echo '{"err": 1}' > "$tmp/$i.json" ) & pids+=($!)
     done
-    wait
+    ( sleep 60; kill "${pids[@]}" 2>/dev/null ) & dog=$!   # một máy treo không làm đứng cả màn hình
+    wait "${pids[@]}" 2>/dev/null; kill $dog 2>/dev/null
+    for i in 1 2 3; do [ -s "$tmp/$i.json" ] || echo '{"err": 1}' > "$tmp/$i.json"; done
     cols=$(stty size </dev/tty 2>/dev/null | awk '{print $2}'); [ -n "$cols" ] || cols=160
     out=$(python3 - "$tmp" "$every" "$cols" <<'PY'
 import json, os, shutil, sys
