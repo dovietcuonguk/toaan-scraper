@@ -329,7 +329,15 @@ def write_one(court, rec, res, used):
         tmp = md_dir / f".{final}.md.tmp"
         tmp.write_text(FM.build(fields) + f"\n# {final}\n\n" + body, encoding="utf-8")
         os.replace(tmp, md_dir / f"{final}.md")
-        os.replace(rec["pdf_path"], up_dir / f"{final}.pdf")  # cùng ổ đĩa: đổi chỗ tức thời
+        for k in range(5):  # upload3 có thể vừa xóa thư mục rỗng up_dir → tạo lại rồi thử lại
+            try:
+                up_dir.mkdir(parents=True, exist_ok=True)
+                os.replace(rec["pdf_path"], up_dir / f"{final}.pdf")  # cùng ổ đĩa: đổi chỗ tức thời
+                break
+            except FileNotFoundError:
+                if k == 4 or not os.path.exists(rec["pdf_path"]):
+                    raise
+                time.sleep(0.5)
     except Exception as e:  # noqa: BLE001
         status, note = "LOI", str(e)
     return {"id": rid, "court": court["value"], "case_type": case_type, "status": status, "final_stem": final,

@@ -9,7 +9,7 @@ K="$(cat "$WORK/dot2_vps" 2>/dev/null || echo 0)"
 UP="$WORK/upload2"
 LOG="$WORK/logs/upload3.log"
 mkdir -p "$UP" "$WORK/logs"
-OPTS=(--min-age 30s --transfers 4 --checkers 4 --tpslimit 4 --no-traverse --delete-empty-src-dirs
+OPTS=(--min-age 30s --transfers 4 --checkers 4 --tpslimit 4 --no-traverse
       --retries 5 --low-level-retries 10 --log-file "$WORK/logs/rclone3.log" --log-level NOTICE)
 last=0
 while true; do
@@ -18,9 +18,13 @@ while true; do
     t0=$(date +%s)
     rclone move "$UP" banan: "${OPTS[@]}"; rc=$?
     left=$(find "$UP" -type f -name '*.pdf' | wc -l)
+  # Dọn thư mục rỗng đã lâu (không xóa thư mục process2 vừa tạo, tránh lỗi "No such file")
+  find "$UP" -mindepth 1 -type d -empty -mmin +30 -delete 2>/dev/null
     echo "$(date '+%F %T') đẩy $((n - left))/$n PDF trong $(( $(date +%s) - t0 ))s (mã $rc), còn $left" >> "$LOG"
   fi
   left=$(find "$UP" -type f -name '*.pdf' | wc -l)
+  # Dọn thư mục rỗng đã lâu (không xóa thư mục process2 vừa tạo, tránh lỗi "No such file")
+  find "$UP" -mindepth 1 -type d -empty -mmin +30 -delete 2>/dev/null
   now=$(date +%s)
   if [ $((now - last)) -ge 1800 ]; then
     "$REPO/.venv/bin/python" "$REPO/vps/dot2_status.py" > "$WORK/TIEN_DO_DOT2_VPS.md" 2>>"$LOG"

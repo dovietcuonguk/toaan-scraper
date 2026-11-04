@@ -244,8 +244,8 @@ cmd_keo() {
   total=0
   while true; do
     free_gb=$(df -g "$HOME" | awk 'NR==2{print $4}')
-    if [ "${free_gb:-0}" -lt 15 ]; then
-      echo "$(date '+%F %T') MacBook còn ${free_gb} GB trống — chờ 10 phút"; sleep 600; continue
+    if [ "${free_gb:-0}" -lt "${MIN_FREE_GB:-15}" ]; then
+      echo "$(date '+%F %T') MacBook còn ${free_gb} GB trống (ngưỡng ${MIN_FREE_GB:-15} GB) — chờ 10 phút"; sleep 600; continue
     fi
     got_any=0; done_all=1
     for i in 1 2 3; do
