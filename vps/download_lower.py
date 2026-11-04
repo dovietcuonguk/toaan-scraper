@@ -77,13 +77,17 @@ def main():
             return [("tat-ca", None, None)]
         kv = c["kind"] == "khu-vuc"
         b = [] if kv else [("truoc-2017", "01/01/1990", "31/12/2016")]
-        for y in range(2025 if kv else 2017, THIS_YEAR + 1):
+        # TAND cấp huyện chấm dứt hoạt động từ 01/7/2025 (TAND khu vực thay thế): không tìm sau 30/6/2025.
+        # Truy vấn rỗng trên cổng không trả "0 kết quả" mà chờ đến hết thời gian (~15 phút/nhóm) → bỏ hẳn.
+        for y in range(2025 if kv else 2017, (THIS_YEAR if kv else 2025) + 1):
             ydir = data / c["city"] / c["value"] / str(y)
             if (mark / f"{c['value']}__{y}").exists() or (ydir / "records.jsonl").exists():
                 b.append((str(y), f"01/01/{y}", f"31/12/{y}"))
                 continue
             for q, d1, d2 in QUARTERS:
                 if kv and y == 2025 and q < 3:  # TAND khu vực hoạt động từ 01/7/2025
+                    continue
+                if not kv and y == 2025 and q > 2:  # TAND cấp huyện đến 30/6/2025
                     continue
                 b.append((f"{y}-Q{q}", f"{d1}/{y}", f"{d2}/{y}"))
         return b
@@ -162,6 +166,8 @@ def main():
     log("===== Lượt cập nhật: năm hiện tại và các Tòa không chia năm =====")
     for c in ([] if a.test else courts):
         for b, f_, t_ in buckets(c):
+            if c["kind"] != "khu-vuc" and b != "tat-ca":  # cấp huyện: không còn bản án mới
+                continue
             if b in ("tat-ca", str(THIS_YEAR)) or b.startswith(f"{THIS_YEAR}-Q"):
                 do(c, b, f_, t_, refresh=True)
     (work / ("DOWNLOAD2_TEST_DONE" if a.test else "DOWNLOAD2_DONE")).write_text(datetime.now().isoformat(timespec="seconds"))

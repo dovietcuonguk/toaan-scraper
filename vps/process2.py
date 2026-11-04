@@ -238,6 +238,7 @@ def target(court, rec, text=None, prev_ct=None):
     return rel, fit_bytes(stem), ct, thieu
 
 
+OK_IDS = set()   # mã đã đặt tên + chuyển PDF xong
 RETRIED = set()  # mã đã cho làm lại trong lần chạy này (mỗi mã LỖI chỉ làm lại một lần/lần khởi động)
 
 
@@ -253,6 +254,8 @@ def load_state():
                 done.add(r["id"])
                 used.add((r["dest_dir"], r["final_stem"]))
     loi -= done
+    OK_IDS.clear()
+    OK_IDS.update(done)
     done |= RETRIED & loi  # đã làm lại một lần mà vẫn lỗi: để fix_names2/suaten xử lý
     return done, used, loi - RETRIED
 
@@ -274,8 +277,11 @@ def drop_loi_rows(ids):
     tmp.replace(STATE_CSV)
 
 
+DUP = [0]
+
+
 def candidates(done, limit):
-    out = []
+    out, seen = [], set()
     for rf in sorted(DATA2.glob("*/*/*/records_full.jsonl")):
         cj = rf.parent / "court.json"
         if not cj.exists():
@@ -288,9 +294,19 @@ def candidates(done, limit):
                 except json.JSONDecodeError:  # dòng cuối fetch_pdfs.py đang ghi dở
                     continue
                 rid = rec.get("id")
-                if not rid or rid in done or not rec.get("pdf_path") or not os.path.exists(rec["pdf_path"]):
+                if not rid or not rec.get("pdf_path") or not os.path.exists(rec["pdf_path"]):
+                    continue
+                if rid in done:
+                    # Bản trùng (cùng mã đã được tải ở nhóm khác và đã lên Drive): xóa PDF thừa trên VPS
+                    if rid in OK_IDS and rid not in seen:
+                        try:
+                            os.remove(rec["pdf_path"])
+                            DUP[0] += 1
+                        except OSError:
+                            pass
                     continue
                 done.add(rid)
+                seen.add(rid)
                 out.append((court, rec))
                 if len(out) >= limit:
                     return out
@@ -419,6 +435,9 @@ def main():
     while True:
         try:
             st = one_pass(a.batch, a.workers)
+            if DUP[0]:
+                log(f"xóa {DUP[0]} PDF trùng (đã có trên Drive)")
+                DUP[0] = 0
             if st:
                 log("xử lý lô: " + ", ".join(f"{k}={v}" for k, v in sorted(st.items())))
                 continue  # còn việc: làm tiếp ngay
