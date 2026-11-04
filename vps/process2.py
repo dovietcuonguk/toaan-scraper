@@ -304,6 +304,7 @@ def _sp(v):
 
 def write_one(court, rec, res, used):
     text, method, npages, anh = res
+    src = rec["pdf_path"]  # đường dẫn thật trên đĩa: KHÔNG chuẩn hóa (tên file có thể có 2 dấu cách / NFD)
     rec = {k: _sp(v) for k, v in rec.items()}
     rid = rec["id"]
     rel, stem, case_type, thieu = target(court, rec, text)
@@ -312,7 +313,7 @@ def write_one(court, rec, res, used):
         final = f"{stem} (bản {n})"
         n += 1
     used.add((str(rel), final))
-    hong = not pdf_ok(rec["pdf_path"])
+    hong = not pdf_ok(src)
 
     nguoi = FM.tach_nguoi_tien_hanh_to_tung(text) if text else {"tham_phan": [], "thu_ky": [], "kiem_sat_vien": []}
     fields = {
@@ -358,10 +359,10 @@ def write_one(court, rec, res, used):
         for k in range(5):  # upload3 có thể vừa xóa thư mục rỗng up_dir → tạo lại rồi thử lại
             try:
                 up_dir.mkdir(parents=True, exist_ok=True)
-                os.replace(rec["pdf_path"], up_dir / f"{final}.pdf")  # cùng ổ đĩa: đổi chỗ tức thời
+                os.replace(src, up_dir / f"{final}.pdf")  # cùng ổ đĩa: đổi chỗ tức thời
                 break
             except FileNotFoundError:
-                if k == 4 or not os.path.exists(rec["pdf_path"]):
+                if k == 4 or not os.path.exists(src):
                     raise
                 time.sleep(0.5)
     except Exception as e:  # noqa: BLE001
