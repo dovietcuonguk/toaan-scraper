@@ -11,6 +11,8 @@
 #   bash ~/dot2_mac.sh theodoi [giây]  màn hình theo dõi thời gian thực cả 3 máy (mặc định 30 giây/lần)
 #   caffeinate -is bash ~/dot2_mac.sh keo    kéo MD về MDBANAN (để Terminal mở, MacBook cắm sạc)
 #   bash ~/dot2_mac.sh suaten         đổi lại tên file đã xử lý theo quy tắc mới (Drive + VPS + Mac)
+#   bash ~/dot2_mac.sh dem [1|2|3]    đếm số bản án toàn quốc (Tòa cấp tỉnh/huyện/khu vực còn lại), chia 3 máy
+#   bash ~/dot2_mac.sh ketquadem      xem tiến độ / kết quả đếm, ước tính dung lượng và thời gian tải
 #   bash ~/dot2_mac.sh dung           dừng tải trên cả 3 máy (khẩn cấp)
 set -u
 HOSTS=("${VPS1:-14.225.215.198}" "${VPS2:-103.153.75.234}" "${VPS3:-103.153.75.147}")
@@ -240,6 +242,72 @@ PY
   done
 }
 
+cmd_dem() {
+  only="${1:-}"
+  tmp=$(mktemp)
+  sshq "$(host 1)" 'cat /root/work/probe_levels.json' > "$tmp" || { echo "Không lấy được probe_levels.json từ VPS1"; exit 1; }
+  for i in 1 2 3; do
+    [ -n "$only" ] && [ "$only" != "$i" ] && continue
+    h=$(host $i)
+    if ! sshq "$h" 'test -f /root/work/DOWNLOAD2_DONE' && [ "${NGAY:-0}" != "1" ]; then
+      echo "VPS$i: đợt 2 chưa tải xong — chưa đếm (chạy lại sau, hoặc NGAY=1 bash ~/dot2_mac.sh dem $i để đếm luôn)"; continue
+    fi
+    [ "$i" = 1 ] || sshq "$h" 'cat > /root/work/probe_levels.json' < "$tmp"
+    sshq "$h" "/usr/local/bin/toaan-update >/dev/null 2>&1; systemctl is-active -q toaan-count-all && echo 'VPS$i: đang đếm rồi' || \
+      { systemd-run --unit toaan-count-all --collect --setenv=TOAAN_WORK=/root/work \
+          $R/.venv/bin/python $R/tools/count_all.py --shard $i/3 >/dev/null && echo 'VPS$i: đã bắt đầu đếm'; }"
+  done
+  rm -f "$tmp"
+  echo "Xem tiến độ: bash ~/dot2_mac.sh ketquadem"
+}
+
+cmd_ketquadem() {
+  d=$(mktemp -d)
+  for i in 1 2 3; do
+    sshq "$(host $i)" "cat /root/work/count_all_$i.json 2>/dev/null; true" > "$d/$i.json"
+    st=$(sshq "$(host $i)" 'systemctl is-active toaan-count-all 2>/dev/null; true')
+    echo "VPS$i: ${st:-?}"
+  done
+  python3 - "$d" "$LOGD/dem_toan_quoc.csv" <<'PY'
+import csv, json, os, sys
+d, out = sys.argv[1], sys.argv[2]
+rows = []
+for i in (1, 2, 3):
+    p = os.path.join(d, "%d.json" % i)
+    try:
+        rows += list(json.load(open(p)).values())
+    except Exception:
+        pass
+def f(n): return "{:,}".format(int(n)).replace(",", ".")
+ok = [r for r in rows if isinstance(r.get("total"), int)]
+bad = [r for r in rows if not isinstance(r.get("total"), int)]
+tot = sum(r["total"] for r in ok)
+by = {}
+for r in ok:
+    k = (r["parent"], r["kind"])
+    by[k] = by.get(k, 0) + r["total"]
+prov = {}
+for (p, kind), n in by.items():
+    prov.setdefault(p, {"tinh": 0, "huyen": 0, "khu-vuc": 0})[kind] += n
+print("\nĐã đếm %d Tòa (%d không đọc được số: 0 bản án hoặc lỗi). Tổng: %s bản án" % (len(rows), len(bad), f(tot)))
+for kind, lab in (("tinh", "cấp tỉnh"), ("huyen", "cấp huyện (cũ)"), ("khu-vuc", "khu vực")):
+    print("  %-16s %s" % (lab, f(sum(r["total"] for r in ok if r["kind"] == kind))))
+print("\nƯớc tính nếu tải hết: PDF ~%.2f TB (1,5 MB/bản) · MD ~%.0f GB (25 KB/bản; ~30 KB sau OCR)" % (tot * 1.5 / 1e6, tot * 25 / 1e6))
+for n, rate in ((3, 6900), (4, 8800), (5, 10000), (6, 10500)):
+    print("  %d VPS (~%s bản/giờ): ~%.0f giờ ≈ %.1f ngày" % (n, f(rate), tot / rate, tot / rate / 24))
+print("\nTheo tỉnh/thành (20 lớn nhất):")
+for p, v in sorted(prov.items(), key=lambda x: -sum(x[1].values()))[:20]:
+    print("  %-40s %9s  (tỉnh %s · huyện %s · khu vực %s)" % (p[:40], f(sum(v.values())), f(v["tinh"]), f(v["huyen"]), f(v["khu-vuc"])))
+with open(out, "w", newline="", encoding="utf-8") as fh:
+    w = csv.writer(fh)
+    w.writerow(["cap", "ma_toa", "ten_toa", "tinh_thanh", "loai", "so_ban_an", "ghi_chu"])
+    for r in sorted(rows, key=lambda r: (r["parent"], r["level"], r["name"])):
+        w.writerow([r["level"], r["value"], r["name"], r["parent"], r["kind"], r.get("total"), r.get("note", "")])
+print("\nBảng đầy đủ từng Tòa: " + out)
+PY
+  rm -rf "$d"
+}
+
 cmd_dung() {
   for i in 1 2 3; do sshq "$(host $i)" 'systemctl stop toaan-lower; echo "VPS'"$i"': đã dừng tải (toaan-lower)"'; done
 }
@@ -285,6 +353,8 @@ case "${1:-}" in
   theodoi) cmd_theodoi "${2:-30}";;
   keo) cmd_keo;;
   suaten) cmd_suaten;;
+  dem) cmd_dem "${2:-}";;
+  ketquadem) cmd_ketquadem;;
   dung) cmd_dung;;
-  *) sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//';;
+  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//';;
 esac
