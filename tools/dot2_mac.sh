@@ -14,6 +14,7 @@
 #   bash ~/dot2_mac.sh dem [1|2|3]    đếm số bản án toàn quốc (Tòa cấp tỉnh/huyện/khu vực còn lại), chia 3 máy
 #   bash ~/dot2_mac.sh ketquadem      xem tiến độ / kết quả đếm, ước tính dung lượng và thời gian tải
 #   bash ~/dot2_mac.sh dung           dừng tải trên cả 3 máy (khẩn cấp)
+#   bash ~/dot2_mac.sh taibu dem|chay|tiendo   tải bù PDF cho mã đã liệt kê nhưng chưa có MD (PDF bị mất trên VPS)
 #   bash ~/dot2_mac.sh ocr dem        đếm số bản / trang ảnh NATIVE_MOT_PHAN còn phải OCR trên 3 máy
 #   bash ~/dot2_mac.sh ocr thu        OCR thử 40 bản trên mỗi máy, đo tốc độ, ước tính thời gian
 #   bash ~/dot2_mac.sh ocr chay       chạy OCR trên 3 máy (nền, ưu tiên thấp; tự dừng khi xong)
@@ -376,6 +377,26 @@ cmd_ocr() {
   true
 }
 
+cmd_taibu() {
+  sub="${1:-dem}"
+  for i in 1 2 3; do
+    h=$(host $i)
+    case "$sub" in
+      dem) sshq "$h" "/usr/local/bin/toaan-update >/dev/null 2>&1; true"
+           echo "VPS$i: $(sshq "$h" "TOAAN_WORK=/root/work $R/.venv/bin/python $R/vps/tai_bu.py --dem")";;
+      chay) sshq "$h" "/usr/local/bin/toaan-update >/dev/null 2>&1; systemctl start toaan-process2 toaan-upload3; \
+             systemctl is-active -q toaan-taibu && echo 'VPS$i: đang tải bù rồi' || \
+             { systemd-run --unit toaan-taibu --collect --setenv=TOAAN_WORK=/root/work \
+                 $R/.venv/bin/python $R/vps/tai_bu.py >/dev/null && echo 'VPS$i: đã bắt đầu tải bù'; }";;
+      tiendo) echo "--- VPS$i: $(sshq "$h" 'systemctl is-active toaan-taibu 2>/dev/null; true')"
+              sshq "$h" 'tail -3 /root/work/logs/tai_bu.log 2>/dev/null; true';;
+      *) echo "Lệnh: taibu dem | chay | tiendo"; exit 1;;
+    esac
+  done
+  [ "$sub" = chay ] && echo "Theo dõi: bash ~/dot2_mac.sh taibu tiendo · MD về Mac: caffeinate -is bash ~/dot2_mac.sh keo"
+  true
+}
+
 cmd_ghepocr() {
   [ -d "$MD_ROOT" ] || { echo "Không thấy thư mục: $MD_ROOT"; exit 1; }
   IN="$LOGD/ocr_in"; mkdir -p "$IN"
@@ -411,6 +432,7 @@ cmd_ghepocr() {
 
 case "${1:-}" in
   ocr) cmd_ocr "${2:-dem}";;
+  taibu) cmd_taibu "${2:-dem}";;
   ghepocr) cmd_ghepocr;;
   chuanbi) cmd_chuanbi;;
   capquyen) cmd_capquyen "${2:-}";;
@@ -424,5 +446,5 @@ case "${1:-}" in
   dem) cmd_dem "${2:-}";;
   ketquadem) cmd_ketquadem;;
   dung) cmd_dung;;
-  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//';;
+  *) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//';;
 esac
