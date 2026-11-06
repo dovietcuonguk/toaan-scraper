@@ -213,7 +213,8 @@ def main():
             one_pass(rows, a.workers)
         if not a.loop:
             return
-        if not rows and (WORK / "DOT2_ALL_DONE").exists():
+        taibu = subprocess.run(["systemctl", "is-active", "-q", "toaan-taibu"]).returncode == 0
+        if not rows and (WORK / "DOT2_ALL_DONE").exists() and not taibu:
             (WORK / "OCR2_DONE").write_text(datetime.now().isoformat(timespec="seconds"))
             log("===== OCR xong toàn bộ bản NATIVE_MOT_PHAN của máy này =====")
             return

@@ -32,7 +32,7 @@ while true; do
     last=$now
   fi
   # Xong toàn bộ: đã tải xong, không còn PDF chờ xử lý / chờ đẩy
-  if [ -f "$WORK/DOWNLOAD2_DONE" ] && [ "$left" = "0" ]; then
+  if [ -f "$WORK/DOWNLOAD2_DONE" ] && [ "$left" = "0" ] && ! systemctl is-active -q toaan-taibu; then
     pending=$("$REPO/.venv/bin/python" "$REPO/vps/dot2_status.py" --pending 2>/dev/null || echo 1)
     [ "$pending" = "0" ] && [ ! -f "$WORK/DOT2_ALL_DONE" ] && date -Iseconds > "$WORK/DOT2_ALL_DONE" \
       && echo "$(date '+%F %T') ĐÃ XONG đợt 2 trên máy này" >> "$LOG"

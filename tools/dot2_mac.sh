@@ -342,7 +342,7 @@ cmd_keo() {
         fi
       done <<< "$batches"
       [ -n "$batches" ] && done_all=0
-      sshq "$h" 'test -f /root/work/DOT2_ALL_DONE && [ -z "$(find /root/work/md2 -name "*.md" -print -quit)" ]' || done_all=0
+      sshq "$h" 'test -f /root/work/DOT2_ALL_DONE && ! systemctl is-active -q toaan-taibu && [ -z "$(find /root/work/md2 -name "*.md" -print -quit)" ]' || done_all=0
     done
     [ "$done_all" = 1 ] && { echo "$(date '+%F %T') Cả 3 máy đã xong. Tổng $total MD."; exit 0; }
     [ "$got_any" = 0 ] && { echo "$(date '+%F %T') Chưa có MD mới (tổng $total). Chờ 5 phút."; sleep 300; }
