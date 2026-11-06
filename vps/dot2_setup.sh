@@ -9,7 +9,7 @@ step() { echo "== $* =="; }
 
 step "1/5 Cài phần mềm (git, python, poppler, rclone)"
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y -qq git python3-venv poppler-utils rclone curl ca-certificates >/dev/null 2>&1 \
+apt-get install -y -qq git python3-venv poppler-utils rclone curl ca-certificates tesseract-ocr tesseract-ocr-vie >/dev/null 2>&1 \
   || { echo "LỖI cài phần mềm"; exit 1; }
 echo "rclone: $(rclone version | head -1)"
 

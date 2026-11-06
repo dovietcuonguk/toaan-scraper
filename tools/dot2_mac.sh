@@ -14,6 +14,11 @@
 #   bash ~/dot2_mac.sh dem [1|2|3]    đếm số bản án toàn quốc (Tòa cấp tỉnh/huyện/khu vực còn lại), chia 3 máy
 #   bash ~/dot2_mac.sh ketquadem      xem tiến độ / kết quả đếm, ước tính dung lượng và thời gian tải
 #   bash ~/dot2_mac.sh dung           dừng tải trên cả 3 máy (khẩn cấp)
+#   bash ~/dot2_mac.sh ocr dem        đếm số bản / trang ảnh NATIVE_MOT_PHAN còn phải OCR trên 3 máy
+#   bash ~/dot2_mac.sh ocr thu        OCR thử 40 bản trên mỗi máy, đo tốc độ, ước tính thời gian
+#   bash ~/dot2_mac.sh ocr chay       chạy OCR trên 3 máy (nền, ưu tiên thấp; tự dừng khi xong)
+#   bash ~/dot2_mac.sh ocr tiendo     xem tiến độ OCR
+#   caffeinate -is bash ~/dot2_mac.sh ghepocr   kéo chữ OCR về và ghép vào MD trong MDBANAN
 set -u
 HOSTS=("${VPS1:-14.225.215.198}" "${VPS2:-103.153.75.234}" "${VPS3:-103.153.75.147}")
 SECRET_JSON="${SECRET_JSON:-$HOME/.config/banan-rclone/client_secret.json}"
@@ -343,7 +348,70 @@ cmd_keo() {
   done
 }
 
+cmd_ocr() {
+  sub="${1:-dem}"
+  for i in 1 2 3; do
+    h=$(host $i)
+    case "$sub" in
+      dem|thu|chay)
+        sshq "$h" "/usr/local/bin/toaan-update >/dev/null 2>&1; command -v tesseract >/dev/null && tesseract --list-langs 2>/dev/null | grep -qx vie || \
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq tesseract-ocr tesseract-ocr-vie >/dev/null 2>&1" ;;
+    esac
+    case "$sub" in
+      dem) echo "VPS$i: $(sshq "$h" "TOAAN_WORK=/root/work $R/.venv/bin/python $R/vps/ocr2.py --dem")";;
+      thu) ( out=$(sshq "$h" "systemctl is-active -q toaan-ocr2 && echo 'đang chạy OCR chính thức — bỏ qua thử' || \
+               TOAAN_WORK=/root/work nice -n 10 $R/.venv/bin/python $R/vps/ocr2.py --thu 40 | tail -2")
+             printf '=== VPS%s ===\n%s\n' "$i" "$out" ) & ;;
+      chay) sshq "$h" "systemctl is-active -q toaan-ocr2 && echo 'VPS$i: đang chạy OCR rồi' || \
+             { systemd-run --unit toaan-ocr2 --collect --nice=10 --setenv=TOAAN_WORK=/root/work \
+                 $R/.venv/bin/python $R/vps/ocr2.py --loop >/dev/null && echo 'VPS$i: đã bắt đầu OCR'; }";;
+      tiendo) echo "--- VPS$i: $(sshq "$h" 'systemctl is-active toaan-ocr2 2>/dev/null; test -f /root/work/OCR2_DONE && echo XONG; true' | tr '\n' ' ')"
+              sshq "$h" "TOAAN_WORK=/root/work $R/.venv/bin/python $R/vps/ocr2.py --dem; \
+                echo \"lô chờ Mac kéo: \$(ls /root/work/outbox_ocr 2>/dev/null | grep -c '^ocr-')\"; tail -1 /root/work/logs/ocr2.log 2>/dev/null; true";;
+      *) echo "Lệnh: ocr dem | thu | chay | tiendo"; exit 1;;
+    esac
+  done
+  wait
+  [ "$sub" = chay ] && echo "Tiếp theo (cửa sổ Terminal riêng): caffeinate -is bash ~/dot2_mac.sh ghepocr"
+  true
+}
+
+cmd_ghepocr() {
+  [ -d "$MD_ROOT" ] || { echo "Không thấy thư mục: $MD_ROOT"; exit 1; }
+  IN="$LOGD/ocr_in"; mkdir -p "$IN"
+  curl -fsSL "$RAW/tools/ocr_ghep.py" -o "$LOGD/ocr_ghep.py" || { echo "Không tải được ocr_ghep.py"; exit 1; }
+  echo "$(date '+%F %T') Kéo chữ OCR từ 3 VPS và ghép vào MD: $MD_ROOT"
+  while true; do
+    if [ -d "$LOGD/suaten.lock" ]; then echo "$(date '+%F %T') suaten đang chạy — chờ 2 phút"; sleep 120; continue; fi
+    got_any=0; done_all=1
+    for i in 1 2 3; do
+      h=$(host $i)
+      batches=$(sshq "$h" 'cd /root/work/outbox_ocr 2>/dev/null && for d in ocr-*/; do [ -d "$d" ] && echo "${d%/} $(ls "$d" | wc -l)"; done; true') \
+        || { done_all=0; continue; }
+      while read -r b n; do
+        [ -z "$b" ] && continue
+        mkdir -p "$IN/$b"
+        sshq "$h" "tar -C /root/work/outbox_ocr/$b -cf - ." | tar -C "$IN/$b" -xf - 2>/dev/null
+        got=$(find "$IN/$b" -name '*.json' | wc -l | tr -d ' ')
+        if [ "$got" -ge "$n" ]; then
+          sshq "$h" "rm -rf /root/work/outbox_ocr/$b"; got_any=1
+          echo "$(date '+%F %T') VPS$i lô $b: $n bản"
+        else
+          echo "$(date '+%F %T') VPS$i lô $b: chỉ nhận $got/$n — sẽ kéo lại"; done_all=0
+        fi
+      done <<< "$batches"
+      [ -n "$batches" ] && done_all=0
+      sshq "$h" 'test -f /root/work/OCR2_DONE' || done_all=0
+    done
+    python3 "$LOGD/ocr_ghep.py" "$IN" "$MD_ROOT" "$LOGD/ma_cong_index.tsv"
+    [ "$done_all" = 1 ] && { echo "$(date '+%F %T') OCR cả 3 máy đã xong và đã ghép."; exit 0; }
+    [ "$got_any" = 0 ] && { echo "$(date '+%F %T') Chưa có lô OCR mới. Chờ 5 phút."; sleep 300; }
+  done
+}
+
 case "${1:-}" in
+  ocr) cmd_ocr "${2:-dem}";;
+  ghepocr) cmd_ghepocr;;
   chuanbi) cmd_chuanbi;;
   capquyen) cmd_capquyen "${2:-}";;
   chia) cmd_chia;;
@@ -356,5 +424,5 @@ case "${1:-}" in
   dem) cmd_dem "${2:-}";;
   ketquadem) cmd_ketquadem;;
   dung) cmd_dung;;
-  *) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//';;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//';;
 esac
