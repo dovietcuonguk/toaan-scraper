@@ -97,6 +97,15 @@ def main():
                 b.append((f"{y}-Q{q}", f"{d1}/{y}", f"{d2}/{y}"))
         return b
 
+    def du(c):
+        """Đã lấy đủ danh sách (thiếu ≤ max(20, 1%) so với số trên cổng)? Khi đó bỏ qua các nhóm CHƯA bắt đầu:
+        đó là năm/quý không có bản nào trên cổng — truy vấn rỗng treo ~15 phút × 4 lần mỗi nhóm (06/11: VPS1, VPS2
+        đứng hơn 1 giờ ở các quý 2017 của TAND Nhà Bè, Quận 5 dù hai Tòa đã đủ)."""
+        s = set()
+        for p in (data / c["city"] / c["value"]).glob("*/records.jsonl"):
+            s |= ids(p)
+        return c["total"] - len(s) <= max(20, c["total"] // 100)
+
     def do(c, bucket, dfrom, dto, refresh=False):
         out = data / c["city"] / c["value"] / bucket
         out.mkdir(parents=True, exist_ok=True)
@@ -157,9 +166,13 @@ def main():
     for _ in range(3):
         failed = []
         for c in courts:
+            du_ds = du(c)
             for b, f_, t_ in buckets(c):
-                # court.json cần có ngay cả khi nhóm đang tải dở (khâu tạo MD đọc song song)
                 d = data / c["city"] / c["value"] / b
+                if du_ds and not (mark / f"{c['value']}__{b}").exists() \
+                        and not ((d / "records.jsonl").exists() and (d / "records.jsonl").stat().st_size > 0):
+                    continue  # Tòa đã đủ danh sách: nhóm chưa bắt đầu là nhóm rỗng trên cổng
+                # court.json cần có ngay cả khi nhóm đang tải dở (khâu tạo MD đọc song song)
                 d.mkdir(parents=True, exist_ok=True)
                 (d / "court.json").write_text(json.dumps(c, ensure_ascii=False), encoding="utf-8")
                 if not do(c, b, f_, t_):
